@@ -149,6 +149,14 @@ git tag "v$VERSION" && git push origin "v$VERSION"
 ./credit.sh <uid>       # 指定账号
 ```
 
+**积分口径**：池与面板的「剩余/总额」都来自 `ide_user_ent_usage`（`user_entitlement_pack_list[]` 里
+`quota.credits_limit>0` 的包求和，`usage.credits_amount` 为已用）。这条通路上**没有**独立的 SOLO 额度字段：
+2026-10-11 抓整条对话流实测，事件只有 `done / extra_info / metadata / output / timing_cost / token_usage`，
+没有第三方笔记记的 `notify_usage`，整条流里 credit/billing/quota/remain 字段 0 条 —— 复跑
+`TW2A_PROBE_CHAT=1 go test ./internal/upstream -run TestProbeLiveBilling -v`。
+该笔记另称 ent usage 聚合的包**含 work 包**（即「显示 remain=2000 其实是 work_credits」）：本仓**未复核**
+（接口只给汇总，`./credit.sh` 拿不到包级数值），所以别据此改选号口径。
+
 ## 保活（防掉线）
 
 `schedule.keepalive_hours`（默认 `[3]`）到点对**全账号无条件**刷一遍 token，不看剩余有效期：
@@ -247,7 +255,8 @@ Spearman 相关系数（真按档位调档应该接近 `+1`）。14 个会思考
 本轮 495 发（15 模型 × 11 列 × 3 轮，版本码 20260811）零失败。
 
 **`kimi-k3` 的开关是「客户端版本码」，不是账号档位**（实测 2026-09-27）：上游按 `X-Ide-Version-Code`
-下发不同的模型表与门控，`X-Ide-Version` 字符串本身不影响结果（`0.1.43`/`0.1.50`/`1.0.0` 同码同表）。
+下发不同的模型表与门控，`X-Ide-Version` 字符串本身不影响结果（`0.1.43`/`0.1.50`/`1.0.0` 同码同表；
+2026-10-11 复核补测 `0.1.52`/`0.1.61` 仍逐行一致）。
 
 | 版本码 | 模型表 | k3 的 `access.identity_list` | 结果 |
 |:--|:--|:--|:--|
@@ -391,6 +400,15 @@ data/             （gitignored）state.json 池状态、usage.json 用量台账
 - `docs/` 不参与上传（gitignore + dockerignore）。
 - 验证类文档（`VERIFICATION.md` 等）不入库。
 - 日志/状态输出只显示 UID/Nickname/积分，不打印 token。
+
+## 血统与致谢
+
+- 本仓 fork 自 [`Sliverkiss/traework2api`](https://github.com/Sliverkiss/traework2api)（原始仓库已下线）。
+  同血统的兄弟实现另见 `JeffHu0912/trae2api` 与 `connectedGraph/trae2api-web`（均 MIT）—— 模型表、版本码、
+  错误码这些实测结论与它们的笔记互为参照；对方实现更小或更旧，**未直接合并其代码**。
+- 只当对拍基线、不进仓的参考实现：`shadyrispy/cpa-multi-plugins`（答案卷）、`240xu/trae2api-more`、
+  `star620/TraeTools`、`trae-workbuddy-switch`。
+- 没有 license 的项目（如 `wefewe/trae2api`）只读参考，不取代码。
 
 ## License
 

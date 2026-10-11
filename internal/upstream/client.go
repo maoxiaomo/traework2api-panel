@@ -107,8 +107,6 @@ func (e *BusinessError) Error() string {
 	return fmt.Sprintf("%s (code %d)", e.Message, e.Code)
 }
 
-var sessionDeadMarkers = []string{"login", "token 失效", "token invalid", "session", "unauthorized", "401"}
-
 // Classify 按 HTTP 状态码 + body 判定错误类别（SPEC §4.3）。
 func Classify(status int, body string) ErrKind {
 	lower := strings.ToLower(body)
@@ -116,13 +114,9 @@ func Classify(status int, body string) ErrKind {
 	if strings.Contains(body, `"code":1005`) || (strings.Contains(body, "1005") && strings.Contains(lower, "plan")) {
 		return ErrPlanLimit
 	}
-	// session 失效
+	// session 失效：401 一律算 session 死。曾经拿 body 标记（login/session/unauthorized…）
+	// 再判一次，但两个分支返回同一个 ErrKind，那段是死代码；是否带标记都不改变结果（TestClassify 两条 401）。
 	if status == http.StatusUnauthorized {
-		for _, m := range sessionDeadMarkers {
-			if strings.Contains(lower, strings.ToLower(m)) {
-				return ErrSessionDead
-			}
-		}
 		return ErrSessionDead
 	}
 	// 传输层的信号优先，别被 body 里的业务码抢走：401/429/404/5xx 说的就是「这次没成」
@@ -965,7 +959,9 @@ type entUsagePack struct {
 		EndTime       int64  `json:"end_time"`
 		EntitlementID string `json:"entitlement_id"`
 		Quota         struct {
-			CreditsLimit int64 `json:"credits_limit"`
+			// CreditsLimit 用 float64：上游可能给 2000.0 这种形态，int64 会让**整包**反序列化
+			// 失败并连带丢掉余额（实测 json.Unmarshal 报 cannot unmarshal number 2000.0）。
+			CreditsLimit float64 `json:"credits_limit"`
 		} `json:"quota"`
 	} `json:"entitlement_base_info"`
 	Usage struct {
@@ -1026,7 +1022,7 @@ func (c *Client) UserEntUsage(a *auth.Auth) (remain, total, expire int64, err er
 		if e > now {
 			expireAny = earlier(expireAny, e)
 		}
-		limit := p.EntitlementBaseInfo.Quota.CreditsLimit
+		limit := int64(p.EntitlementBaseInfo.Quota.CreditsLimit)
 		if limit <= 0 {
 			continue
 		}
@@ -1096,7 +1092,7 @@ func (c *Client) CreditPackages(a *auth.Auth) ([]CreditPackage, int64, int64, er
 	out := make([]CreditPackage, 0, len(resp.UserEntitlementPackList))
 	var sumRemain, sumSize int64
 	for _, p := range resp.UserEntitlementPackList {
-		limit := p.EntitlementBaseInfo.Quota.CreditsLimit
+		limit := int64(p.EntitlementBaseInfo.Quota.CreditsLimit)
 		if limit <= 0 {
 			continue
 		}

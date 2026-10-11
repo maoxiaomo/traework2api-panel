@@ -286,6 +286,25 @@ func TestUserEntUsageAggregation(t *testing.T) {
 	}
 }
 
+// credits_limit 写成浮点（2000.0）不能把整包解析打掉：丢一个包就是丢一份余额，
+// 池的选号权重也跟着塌。上游给的是数字，但 int64 连 2000.0 都收不了（整包反序列化失败）。
+func TestUserEntUsageFloatLimit(t *testing.T) {
+	c := testClient(func(r *http.Request) (*http.Response, error) {
+		return jsonResp(200, `{"is_credits_billing":true,"user_entitlement_pack_list":[
+			{"entitlement_base_info":{"quota":{"credits_limit":2000.0}},"usage":{"credits_amount":10}},
+			{"entitlement_base_info":{"quota":{"credits_limit":1500.5}},"usage":{"credits_amount":0.5}}
+		]}`), nil
+	})
+	remain, total, _, err := c.UserEntUsage(&auth.Auth{AccessToken: "at"})
+	if err != nil {
+		t.Fatalf("浮点 credits_limit 不该让整包解析失败: %v", err)
+	}
+	// (2000-10) + (1500-0)：1500.5 与 0.5 都截断。
+	if remain != 3490 || total != 3500 {
+		t.Errorf("remain=%d total=%d want 3490/3500", remain, total)
+	}
+}
+
 func TestCheckinClaimRejectsBusinessError(t *testing.T) {
 	c := testClient(func(r *http.Request) (*http.Response, error) {
 		return jsonResp(200, `{"code":9074,"message":"当前参与用户太多，请稍后再试"}`), nil

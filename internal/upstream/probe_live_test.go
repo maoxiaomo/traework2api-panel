@@ -8,6 +8,11 @@ package upstream
 //
 // 2026-09 实测：上游 39 条配置 = 15 条官方 + 9 条 is_invisible_to_user（子代理等）
 // + 14 条 custom_model_* 槽位 + 1 条 summary。过滤口径见 pickOfficialModels。
+//
+// 2026-10-11 版本对拍（本仓 0.1.50 / 0.1.52 / 0.1.61，X-App-Version-Code 固定 20260811；
+// 另在副本里把常量换成 0.1.61+20260820）：四次返回**逐行一致**，46 条配置 / 19 个官方模型。
+// ⇒ 版本号只在新旧差很大时才影响模型表（connectedGraph 记 0.1.43 求 glm-5.3 报 4001），
+// 本仓的 0.1.50+20260811 已在工作区间，不必跟着别人的版本往上抬。
 
 import (
 	"bytes"
@@ -649,5 +654,101 @@ func TestProbeLiveDeviceHeader(t *testing.T) {
 		_ = json.Unmarshal(data, &m)
 		fmt.Printf("  %-26s -> 200 checked_in=%v enable=%v code=%v\n",
 			tc.label, m["checked_in"], m["enable"], m["code"])
+	}
+}
+
+// TestProbeLiveBilling 花额度的一次性探测：SOLO 流里到底有哪些 SSE 事件名，
+// 计费/额度信息落在哪个事件、字段路径长什么样 —— 决定「池要不要读 ide_credits」。
+// 这一条**整条流读完**（别的探针掐前 240/400 字节）：事件序列本身就是结论。
+// 手动跑：TW2A_PROBE_CHAT=1 go test ./internal/upstream -run TestProbeLiveBilling -v
+//
+// 2026-10-11 实测（glm-5.2 / CN 号 253358232317424，21KB 流）：事件只有
+// done / extra_info / metadata / output×162 / timing_cost / token_usage；
+// **没有 notify_usage**，整条流里 credit/billing/quota/remain 字段 0 条。
+// token_usage 只有 token 计数（+ cluster/name）⇒ 上游不在这条通道下发计费结构；
+// connectedGraph 那份 RESEARCH 记的 `cn_credits_remain_info.ide_credits` 在这里取不到，
+// 池的积分只能继续靠 ide_user_ent_usage（要复现就先跑本探针）。
+func TestProbeLiveBilling(t *testing.T) {
+	if os.Getenv("TW2A_PROBE_CHAT") == "" {
+		t.Skip("置 TW2A_PROBE_CHAT=1 才跑（真实发聊天请求，吃额度）")
+	}
+	model := os.Getenv("TW2A_PROBE_MODEL")
+	if model == "" {
+		model = "glm-5.2"
+	}
+	body := fmt.Sprintf(`{"model":%q,"messages":[{"role":"user","content":"hi"}],"max_tokens":8,"stream":true}`, model)
+	c, a := probeChat(t, body)
+	rc, status, respBody, err := c.ChatStream(a, []byte(body))
+	if err != nil {
+		t.Fatalf("传输层错误: %v", err)
+	}
+	if rc == nil {
+		t.Fatalf("被拒 %d: %.300s", status, respBody)
+	}
+	raw, _ := io.ReadAll(rc)
+	rc.Close()
+
+	counts := map[string]int{}
+	keys := map[string]string{} // 事件名 → 该事件 data 的顶层键（只留第一份）
+	creditPaths := map[string]bool{}
+	for _, frame := range strings.Split(strings.ReplaceAll(string(raw), "\r\n", "\n"), "\n\n") {
+		var name, data string
+		for _, line := range strings.Split(frame, "\n") {
+			switch {
+			case strings.HasPrefix(line, "event:"):
+				name = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
+			case strings.HasPrefix(line, "data:"):
+				data += strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+			}
+		}
+		if name == "" && data == "" {
+			continue
+		}
+		counts[name]++
+		var m map[string]any
+		if json.Unmarshal([]byte(data), &m) == nil {
+			if _, seen := keys[name]; !seen {
+				keys[name] = probeKeys(m)
+			}
+			walkCreditPaths("", m, creditPaths)
+		}
+	}
+	names := make([]string, 0, len(counts))
+	for n := range counts {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	fmt.Printf("\n===== 事件计数（model=%s uid=%s，共 %d 字节流）\n", model, a.UID, len(raw))
+	for _, n := range names {
+		fmt.Printf("  %-16s ×%-4d data 顶层键: %s\n", n, counts[n], keys[n])
+	}
+	paths := make([]string, 0, len(creditPaths))
+	for p := range creditPaths {
+		paths = append(paths, p)
+	}
+	sort.Strings(paths)
+	fmt.Printf("----- 含 credit/billing/quota/remain 的字段路径（%d 条）: %s\n", len(paths), strings.Join(paths, " "))
+}
+
+// walkCreditPaths 递归收集键名含 credit/billing/quota/remain 的字段路径（只看键，不打印值）。
+func walkCreditPaths(prefix string, v any, out map[string]bool) {
+	switch m := v.(type) {
+	case map[string]any:
+		for k, vv := range m {
+			p := k
+			if prefix != "" {
+				p = prefix + "." + k
+			}
+			lk := strings.ToLower(k)
+			if strings.Contains(lk, "credit") || strings.Contains(lk, "billing") ||
+				strings.Contains(lk, "quota") || strings.Contains(lk, "remain") {
+				out[p] = true
+			}
+			walkCreditPaths(p, vv, out)
+		}
+	case []any:
+		for _, vv := range m {
+			walkCreditPaths(prefix, vv, out)
+		}
 	}
 }

@@ -73,7 +73,8 @@ func fetchEntUsage(af *authFile) (remain int64, limit int64, packs int, err erro
 		UserEntitlementPackList []struct {
 			EntitlementBaseInfo struct {
 				Quota struct {
-					CreditsLimit int64 `json:"credits_limit"`
+					// 与 internal/upstream 同口径：float64 容忍 2000.0 这种形态。
+					CreditsLimit float64 `json:"credits_limit"`
 				} `json:"quota"`
 			} `json:"entitlement_base_info"`
 			// usage.credits_amount 是已用积分(实测),remain = limit - used
@@ -86,7 +87,7 @@ func fetchEntUsage(af *authFile) (remain int64, limit int64, packs int, err erro
 		return 0, 0, 0, err
 	}
 	for _, p := range env.UserEntitlementPackList {
-		l := p.EntitlementBaseInfo.Quota.CreditsLimit
+		l := int64(p.EntitlementBaseInfo.Quota.CreditsLimit)
 		if l <= 0 {
 			continue
 		}
