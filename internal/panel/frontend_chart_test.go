@@ -9,8 +9,14 @@ import (
 
 // extractJSFunc 从 app.js 源码里抠出顶层函数体（收尾大括号顶格那一行）。
 // 只给本文件用：图表的三个函数是纯函数，抠出来喂 node 就能断言。
+//
+// 先把 CRLF 归一成 LF：Windows 检出（core.autocrlf）下文件是 CRLF，
+// 而下面找的是 "\n}\n"，不归一会**每条前端断言都失败**——那是检出格式的锅，不是代码的锅。
 func extractJSFunc(t *testing.T, src, name string) string {
 	t.Helper()
+	// 13=CR 10=LF，写成码点而不是转义字面量：这段源码本身要过好几层转义，
+	// 直写字面量容易被转义层吃掉（写坏过一次）。
+	src = strings.ReplaceAll(src, string(rune(13))+string(rune(10)), string(rune(10)))
 	i := strings.Index(src, "function "+name+"(")
 	if i < 0 {
 		t.Fatalf("app.js 里找不到 function %s", name)

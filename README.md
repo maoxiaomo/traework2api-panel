@@ -523,6 +523,16 @@ KPI 里「积分合计」只算积分号、国际额度单列一张卡、到期�
 
 顺带：那份逐会话台账带 `mode`/`use_max_mode` 字段，是 Max 模式被上游真实计量的独立佐证。
 
+### 口径键名只准有一个（踩过的坑）
+
+账号级口径在两个接口上必须用**同一个键名**（现统一为 `credit_unit`）。
+踩过的坑：`/panel/api/overview` 发 `credit_unit`、`/panel/api/packages` 曾发 `unit`，
+前端 `isUSD()` 只认前者 → 在「积分构成」视图里美元号被判成积分号，整张卡显示 0
+（`0 · 共 0 · 1 个包 · 占最高 0%`），**不报错、不写日志、单测全绿** ——
+因为单测喂的账号对象带的是 `credit_unit`，只有真浏览器渲染才看得出来。
+回归网：`internal/panel/packages_unit_test.go::TestPackagesUnitKeyMatchesOverview`。
+
+
 
 **`gpt-6-sol` / `gpt-6-luna`（官方门控 + 旁路）**：这两个在模型表里带
 `display_contact_config.access.identity_list=[4,1,2,3]`，免费档（identity 0/5）不在内，直接发回

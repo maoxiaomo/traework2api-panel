@@ -285,22 +285,26 @@ func (p *Panel) models(w http.ResponseWriter, r *http.Request) {
 // 老代码只认 credits_limit 会把它整条跳过 → 面板显示「无积分套餐」，那是假象。
 func (p *Panel) packages(w http.ResponseWriter, r *http.Request) {
 	type item struct {
-		UID      string                   `json:"uid"`
-		Nickname string                   `json:"nickname,omitempty"`
-		Realm    string                   `json:"realm,omitempty"`
-		Unit     string                   `json:"unit"` // credit | usd
-		Remain   int64                    `json:"remain"`
-		Size     int64                    `json:"size"`
-		UsedUSD  float64                  `json:"used_usd,omitempty"`
-		LimitUSD float64                  `json:"limit_usd,omitempty"`
-		Packages []upstream.CreditPackage `json:"packages"`
-		Error    string                   `json:"error,omitempty"`
+		UID      string `json:"uid"`
+		Nickname string `json:"nickname,omitempty"`
+		Realm    string `json:"realm,omitempty"`
+		// CreditUnit 账号级口径，键名与 overview（pool.Status）**必须一致**。
+		// 曾经这里叫 unit、overview 叫 credit_unit，前端 isUSD() 只认后者 →
+		// 构成视图里美元号被判成积分号，整张卡显示 0（= 用户看到的那个 0）。
+		// 同概念两个键名就是这类静默失效的来源，所以这里有 TestPackagesUnitKeyMatchesOverview 兜着。
+		CreditUnit string                   `json:"credit_unit"`
+		Remain     int64                    `json:"remain"`
+		Size       int64                    `json:"size"`
+		UsedUSD    float64                  `json:"used_usd,omitempty"`
+		LimitUSD   float64                  `json:"limit_usd,omitempty"`
+		Packages   []upstream.CreditPackage `json:"packages"`
+		Error      string                   `json:"error,omitempty"`
 	}
 	list := p.cfg.Pool.List()
 	out := make([]item, 0, len(list))
 	for _, st := range list {
 		it := item{UID: st.UID, Nickname: st.Nickname, Realm: st.Realm,
-			Unit: upstream.UnitCredit, Packages: []upstream.CreditPackage{}}
+			CreditUnit: upstream.UnitCredit, Packages: []upstream.CreditPackage{}}
 		a := p.cfg.Pool.AuthByUID(st.UID)
 		if a == nil {
 			it.Error = "凭证不可用"
@@ -314,7 +318,7 @@ func (p *Panel) packages(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		it.Packages = packs
-		it.Unit = u.Unit
+		it.CreditUnit = u.Unit
 		it.Remain, it.Size = u.Remain, u.Total
 		it.UsedUSD, it.LimitUSD = u.UsedUSD, u.LimitUSD
 		out = append(out, it)

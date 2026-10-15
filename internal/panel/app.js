@@ -147,9 +147,14 @@ function go(v) {
 // 额度口径：上游两套计费体系字段不同名、不可换算（国内积分 / 国际美元）。
 //   isUSD(a) true  → 看 used_usd / limit_usd（国际按量计费，credits 恒 0）
 //   isUSD(a) false → 看 credits / credits_total（国内积分）
-// 未标 credit_unit 的老数据一律当积分，零回归。
+// 未标口径的老数据一律当积分，零回归。
+// isUSD 账号是不是美元计费。
+//
+// 认两个键名是**故意的**：overview（pool.Status）发 credit_unit，「额度构成」接口历史上发过
+// unit。两个名字指同一个概念，漏认一个的后果是美元号被判成积分号 → 整张卡显示 0
+// （就是用户截图里那个 0，而且静默、不报错）。这里容错 + 接口侧已统一成 credit_unit。
 function isUSD(a) {
-  return !!(a && a.credit_unit === 'usd');
+  return !!(a && (a.credit_unit === 'usd' || a.unit === 'usd'));
 }
 
 // fmtUSD 美元金额。国际版 Free plan 是「$1 免费额度」这种量级，已用量实测 $0.00059：
@@ -182,6 +187,7 @@ function credTitle(a) {
 // 美元号：显示「剩余 / 额度」+ 已用与剩余百分比——只显示美元数会把「$1 里已用 6 分钱」
 // 读成「满额」，百分比才是运维真正要看的那个数。
 function credCell(a) {
+  a = a || {}; // 兜底：坏输入宁可渲染成 0/—，也不要抛异常把整张表打空
   if (isUSD(a)) {
     const limit = Number(a.limit_usd || 0);
     const used = Number(a.used_usd || 0);
@@ -1253,19 +1259,23 @@ function pkAccountColorMap(list) {
 }
 
 /* pkBySource 把包按来源归并，得到「来源 → 面额/余额/个数」。这是对比的关键视图：
-   两个号的差异一定体现在某几个来源的面额上。分组键带 group，避免同名不同类被并成一类。 */
+   两个号的差异一定体现在某几个来源的面额上。分组键带 group，避免同名不同类被并成一类。
+
+   口径感知：美元包用 pkSize/pkRemain 取数累加到同一组字段，**不混进积分字段**
+   （一个账号的包必然同口径，币种由账号决定，所以不会出现混币种的聚合）。 */
 function pkBySource(packs) {
   const m = new Map();
   for (const p of packs || []) {
     const k = (p.group || '') + '|' + (p.name || '(未命名)');
     const e = m.get(k) || {
       key: k, name: p.name || p.group || '(未命名)', n: 0,
+      unit: p.unit || 'credit',
       remain: 0, size: 0, used: 0, minExpire: 0, minStart: 0,
     };
     e.n += 1;
-    e.remain += Number(p.remain || 0);
-    e.size += Number(p.size || 0);
-    e.used += Number(p.used || 0);
+    e.remain += pkRemain(p);
+    e.size += pkSize(p);
+    e.used += Number(pkIsUSD(p) ? (p.used_usd || 0) : (p.used || 0));
     const ex = Number(p.expire || 0);
     if (ex > 0 && (!e.minExpire || ex < e.minExpire)) e.minExpire = ex;
     const st = Number(p.start || 0);
@@ -1463,7 +1473,11 @@ function renderPackages(d) {
   names.sort((x, y) => sizeOf(y) - sizeOf(x));
   const colorOf = n => pkColor(names.indexOf(n));
 
-  const maxRemain = Math.max(1, ...list.map(a => Number(a.remain || 0)));
+  // 「占最高 N%」只在同口径内比较：美元数与积分数不可比，所以按口径各算一个基准
+  // （选号本来也是按 realm 分组的，同组内单位必然一致）。
+  const maxRemainOf = usd => Math.max(1, ...list
+    .filter(a => !a.error && isUSD(a) === usd)
+    .map(a => (usd ? usdRemain(a) : Number(a.remain || 0))));
 
   $('pkSummary').innerHTML = list.map(a => {
     if (a.error) {
@@ -1472,20 +1486,34 @@ function renderPackages(d) {
         '<span class="realm">' + esc(a.realm || '') + '</span></div>' +
         '<div class="err">查询失败：' + esc(a.error) + '</div></div>';
     }
+    const usd = isUSD(a);
     const srcs = pkBySource(a.packages || []);
-    const total = Math.max(1, Number(a.size || 0));
+    // 美元号的面额/剩余都是小数，格式与合计口径都要跟着换
+    const money = v => (usd ? fmtUSD(v) : fmtTok(v));
+    const total = Math.max(usd ? 0.000001 : 1, usd ? Number(a.limit_usd || 0) : Number(a.size || 0));
+    // 构成条：按各来源的**面额**占比（美元号在 cut 之后才是 0，见 pkSize 的说明）
     const bar = srcs.map(s =>
-      '<i style="width:' + (s.size / total * 100).toFixed(2) + '%;background:' +
-      colorOf(s.key) + '" title="' + esc(s.name) + ' ' + fmtTok(s.size) + '"></i>').join('');
+      '<i style="width:' + (Math.min(100, s.size / total * 100)).toFixed(2) + '%;background:' +
+      colorOf(s.key) + '" title="' + esc(s.name) + ' ' + money(s.size) + '"></i>').join('');
     const legend = srcs.map(s =>
       '<span><i style="background:' + colorOf(s.key) + '"></i>' +
-      esc(s.name) + ' x' + s.n + ' · ' + fmtTok(s.size) + '</span>').join('');
+      esc(s.name) + ' x' + s.n + ' · ' + money(s.size) + '</span>').join('');
+    // 主数字 = 剩余；副行按口径给各自有意义的那个数
+    const remainVal = usd ? usdRemain(a) : Number(a.remain || 0);
+    const totalVal = usd ? Number(a.limit_usd || 0) : Number(a.size || 0);
+    const usedVal = usd ? Number(a.used_usd || 0) : Math.max(0, totalVal - remainVal);
+    const usedPct = totalVal > 0 ? (usedVal / totalVal * 100) : null;
+    const maxRemain = maxRemainOf(usd);
+    const sub = usd
+      ? '共 ' + money(totalVal) + ' · ' + (a.packages || []).length + ' 个包 · 已用 ' +
+        (usedPct == null ? '—' : usedPct.toFixed(usedPct < 1 ? 2 : 1) + '%')
+      : '共 ' + money(totalVal) + ' · ' + (a.packages || []).length +
+        ' 个包 · 占最高 ' + (remainVal / maxRemain * 100).toFixed(0) + '%';
     return '<div class="pk-card">' +
       '<div class="who"><span class="nm">' + esc(a.nickname || String(a.uid || '').slice(0, 8)) + '</span>' +
-      '<span class="realm">' + esc(a.realm || '') + '</span></div>' +
-      '<div class="big">' + fmtTok(a.remain) + '</div>' +
-      '<div class="sub">共 ' + fmtTok(a.size) + ' · ' + (a.packages || []).length +
-      ' 个包 · 占最高 ' + (Number(a.remain || 0) / maxRemain * 100).toFixed(0) + '%</div>' +
+      '<span class="realm">' + esc(a.realm || '') + (usd ? ' · 按量计费' : '') + '</span></div>' +
+      '<div class="big">' + money(remainVal) + '</div>' +
+      '<div class="sub">' + sub + '</div>' +
       '<div class="mixbar">' + bar + '</div>' +
       '<div class="pk-legend">' + legend + '</div>' +
       '</div>';
@@ -1515,7 +1543,8 @@ function renderPackages(d) {
     const groupSummary = (group, label, count, size, remain) =>
       '<tr class="pk-group-summary"><td colspan="7"><button type="button" class="pk-group-toggle"' +
       ' data-pk-group="' + group + '" data-count="' + count + '" data-size="' + size +
-      '" data-remain="' + remain + '" aria-expanded="false">' + label + '，展开</button></td></tr>';
+      '" data-remain="' + remain + '" data-unit="' + (isUSD(a) ? 'usd' : 'credit') +
+      '" aria-expanded="false">' + label + '，展开</button></td></tr>';
     const anyUSD = (a.packages || []).some(pkIsUSD);
     const amt = v => (anyUSD ? fmtUSD(v) : fmtTok(v));
     const rows = groups.visible.map(p => rowOf(p, '')).join('');
@@ -1804,15 +1833,17 @@ function checkinMsg(rs, accounts) {
     const count = btn.dataset.count || '0';
     const size = btn.dataset.size || '0';
     const remain = btn.dataset.remain || '0';
+    // 口径跟着账号走：美元号的分组金额不能按积分格式化（会把 $0.99941 印成 0）。
+    const money = btn.dataset.unit === 'usd' ? fmtUSD : fmtTok;
     btn.setAttribute('aria-expanded', String(!expanded));
     if (group === 'rest') {
       btn.textContent = expanded
-        ? '其余未用完 ' + count + ' 个包（面额合计 ' + fmtTok(size) + ' · 剩余 ' +
-          fmtTok(remain) + '），展开'
+        ? '其余未用完 ' + count + ' 个包（面额合计 ' + money(size) + ' · 剩余 ' +
+          money(remain) + '），展开'
         : '收起其余未用完 ' + count + ' 个包';
     } else {
       btn.textContent = expanded
-        ? '已用完 ' + count + ' 个包（面额合计 ' + fmtTok(size) + '），展开'
+        ? '已用完 ' + count + ' 个包（面额合计 ' + money(size) + '），展开'
         : '收起已用完 ' + count + ' 个包';
     }
   });
