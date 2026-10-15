@@ -1,0 +1,238 @@
+package server
+
+import (
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+
+	"traework2api/internal/auth"
+	"traework2api/internal/upstream"
+)
+
+// installCatalog 直接灌入模型表缓存（同包白盒），免得为测一条出站规则去伪造整棵
+// get_detail_param / batch 响应。灌进去的形状与 fetchDynamicModels 写的完全一致。
+func installCatalog(t *testing.T, models ...upstream.ModelInfo) {
+	t.Helper()
+	realmByModel := map[string]string{}
+	fnByModel := map[string]string{}
+	pickOnlyByModel := map[string]bool{}
+	maxVariantByModel := map[string]string{}
+	for _, m := range models {
+		realmByModel[m.ID] = auth.RealmCN
+		fnByModel[m.ID] = m.Function
+		if m.PickOnly {
+			pickOnlyByModel[m.ID] = true
+		}
+		if m.MaxAvailable() {
+			maxVariantByModel[m.ID] = m.MaxModelName
+		}
+	}
+	dynamicModelsCache.Lock()
+	dynamicModelsCache.ids = models
+	dynamicModelsCache.realmByModel = realmByModel
+	dynamicModelsCache.fnByModel = fnByModel
+	dynamicModelsCache.pickOnlyByModel = pickOnlyByModel
+	dynamicModelsCache.maxVariantByModel = maxVariantByModel
+	dynamicModelsCache.fetched = time.Now()
+	dynamicModelsCache.lastFail = time.Time{}
+	dynamicModelsCache.Unlock()
+	t.Cleanup(func() {
+		dynamicModelsCache.Lock()
+		dynamicModelsCache.ids = nil
+		dynamicModelsCache.maxVariantByModel = nil
+		dynamicModelsCache.fetched = time.Time{}
+		dynamicModelsCache.Unlock()
+	})
+}
+
+// maxModel / plainModel 上游表里同一模型的两种形态（真夹具里的口径）：
+// chat_v3 面 dev=116000 max=1000000 且带 __max 变体名；solo_work_lite 面只有 __dev。
+func maxModel() upstream.ModelInfo {
+	return upstream.ModelInfo{
+		ID: "glm-5.2", Name: "GLM-5.2", Function: "solo_work_lite",
+		ContextWindow: 116000, ContextMax: 1000000,
+		DevModelName: "glm-5.2__dev", MaxModelName: "glm-5.2__max",
+	}
+}
+
+func plainModel() upstream.ModelInfo {
+	return upstream.ModelInfo{
+		ID: "glm-5.2", Name: "GLM-5.2", Function: "solo_work_lite",
+		ContextWindow: 116000, // 无 ctx_max、无 __max 变体名 = 上游没给 Max
+		DevModelName:  "glm-5.2__dev",
+	}
+}
+
+// chatWith 发一次 /v1/chat/completions，返回出站（改写后）的请求体。
+//
+// captured 由假上游填充：网关把 body 交给 upstream 之后我们才能看到最终报文，
+// 断言写在这一层才是「真的发出去了什么」。
+func chatWith(t *testing.T, cfg Config, body string) map[string]any {
+	t.Helper()
+	var captured map[string]any
+	if cfg.Upstream == nil {
+		cfg.Upstream = &upstream.Client{
+			HTTP: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+				raw, _ := io.ReadAll(r.Body)
+				_ = json.Unmarshal(raw, &captured)
+				return &http.Response{
+					StatusCode: 200,
+					Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+					Body:       io.NopCloser(strings.NewReader(soloSSE)),
+				}, nil
+			})},
+			AgentHost: "https://fake.example", UgHost: "https://fake.example",
+			OAuthHost: "https://fake.example", ClientID: upstream.ClientID,
+		}
+	}
+	if cfg.Pool == nil {
+		cfg.Pool = testPoolWith(&auth.Auth{UID: "u1", AccessToken: "at1", ExpiresAt: 9999999999})
+	}
+	if cfg.MaxFunction == "" {
+		cfg.MaxFunction = DefaultMaxFunction
+	}
+	h := NewHandler(cfg)
+	req := httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(body))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("入站请求没成功: code=%d body=%s", rec.Code, rec.Body)
+	}
+	if captured == nil {
+		t.Fatal("假上游没收到请求，出站报文无从断言")
+	}
+	return captured
+}
+
+// TestMaxContextFieldSwitchesModelAndFunction max_context:true 时出站要同时换
+// model（→ __max 变体）与 function（→ Max 面）。
+//
+// 换面是必须的：夹具实测 solo_work_lite 面上游没声明大窗口（12 个 __max 名、0 个更大），
+// chat_v3 才有（20/20）。只换 model 不换面，等于发了个上游当 dev 处理的名字。
+func TestMaxContextFieldSwitchesModelAndFunction(t *testing.T) {
+	installCatalog(t, maxModel())
+	got := chatWith(t, Config{}, `{"model":"glm-5.2","max_context":true,
+		"messages":[{"role":"user","content":"hi"}]}`)
+
+	if got["model"] != "glm-5.2__max" {
+		t.Errorf("出站 model=%v，期望 glm-5.2__max", got["model"])
+	}
+	if got["function"] != "chat_v3" {
+		t.Errorf("出站 function=%v，期望 chat_v3（Max 面）", got["function"])
+	}
+	// config_name 保持裸名：上游是「config_name 找配置、model 找配置里的变体」这个形状。
+	if got["config_name"] != "glm-5.2" {
+		t.Errorf("出站 config_name=%v，期望裸名 glm-5.2", got["config_name"])
+	}
+}
+
+// TestMaxSuffixInModelNameTriggersMax 客户端原生写法（模型名带 __max 后缀）等价。
+func TestMaxSuffixInModelNameTriggersMax(t *testing.T) {
+	installCatalog(t, maxModel())
+	got := chatWith(t, Config{}, `{"model":"cn:glm-5.2__max",
+		"messages":[{"role":"user","content":"hi"}]}`)
+
+	if got["model"] != "glm-5.2__max" || got["function"] != "chat_v3" {
+		t.Errorf("后缀开法没生效: model=%v function=%v", got["model"], got["function"])
+	}
+}
+
+// TestMaxIgnoredWhenUpstreamHasNoMax 上游没给 Max 时如实忽略：不改 model、不改 function、
+// 请求照样成功（不 400）。夹具里 solo_work_lite 面的 glm-5.2 就是这种。
+func TestMaxIgnoredWhenUpstreamHasNoMax(t *testing.T) {
+	installCatalog(t, plainModel())
+	got := chatWith(t, Config{}, `{"model":"glm-5.2","max_context":true,
+		"messages":[{"role":"user","content":"hi"}]}`)
+
+	if got["model"] != "glm-5.2" {
+		t.Errorf("没有 Max 却改了 model: %v", got["model"])
+	}
+	if got["function"] != "solo_work_lite" {
+		t.Errorf("没有 Max 却换了 function: %v", got["function"])
+	}
+}
+
+// TestNoMaxFlagKeepsCurrentWireShape 不开 Max 时报文与改动前一致（零回归）。
+func TestNoMaxFlagKeepsCurrentWireShape(t *testing.T) {
+	installCatalog(t, maxModel())
+	got := chatWith(t, Config{}, `{"model":"glm-5.2","messages":[{"role":"user","content":"hi"}]}`)
+
+	if got["model"] != "glm-5.2" || got["function"] != "solo_work_lite" {
+		t.Errorf("默认档报文变了: model=%v function=%v", got["model"], got["function"])
+	}
+}
+
+// TestMaxFunctionConfigurable Max 面可按配置改（solo_agent 面上 dev 200k + max 1M）。
+func TestMaxFunctionConfigurable(t *testing.T) {
+	installCatalog(t, maxModel())
+	got := chatWith(t, Config{MaxFunction: "solo_agent"}, `{"model":"glm-5.2","max_context":true,
+		"messages":[{"role":"user","content":"hi"}]}`)
+
+	if got["function"] != "solo_agent" {
+		t.Errorf("max_function 没生效: function=%v", got["function"])
+	}
+	if got["model"] != "glm-5.2__max" {
+		t.Errorf("model=%v", got["model"])
+	}
+}
+
+// TestDevSuffixStillMapsBack __dev 后缀仍按老行为剥回裸名（不能因为加 Max 把它打坏）。
+func TestDevSuffixStillMapsBack(t *testing.T) {
+	installCatalog(t, maxModel())
+	got := chatWith(t, Config{}, `{"model":"glm-5.2__dev","messages":[{"role":"user","content":"hi"}]}`)
+
+	if got["model"] != "glm-5.2" {
+		t.Errorf("__dev 后缀没剥回裸名: %v", got["model"])
+	}
+	if got["function"] != "solo_work_lite" {
+		t.Errorf("__dev 不该换 function: %v", got["function"])
+	}
+}
+
+// TestModelListExposesMaxAvailability /v1/models 要如实报可用性，供客户端决定开不开 Max。
+func TestModelListExposesMaxAvailability(t *testing.T) {
+	installCatalog(t, maxModel())
+	h := NewHandler(Config{Pool: testPoolWith(), Upstream: &upstream.Client{}})
+	var withMax map[string]any
+	for _, m := range h.Models() {
+		if m["id"] == "cn:glm-5.2" {
+			withMax = m
+		}
+	}
+	if withMax == nil {
+		t.Fatal("/v1/models 里没有 cn:glm-5.2")
+	}
+	if withMax["max_available"] != true || withMax["max_model"] != "glm-5.2__max" {
+		t.Errorf("Max 可用性没暴露: %v", withMax)
+	}
+
+	installCatalog(t, plainModel())
+	var noMax map[string]any
+	for _, m := range h.Models() {
+		if m["id"] == "cn:glm-5.2" {
+			noMax = m
+		}
+	}
+	if _, has := noMax["max_available"]; has {
+		t.Errorf("没有更大窗口不该报 max_available: %v", noMax)
+	}
+}
+
+// TestSetModelNameInBody 只换 model，config_name 不动；空串是 no-op。
+func TestSetModelNameInBody(t *testing.T) {
+	in := []byte(`{"config_name":"glm-5.2","model":"glm-5.2","stream":true}`)
+	var got map[string]any
+	if err := json.Unmarshal(setModelNameInBody(in, "glm-5.2__max"), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["model"] != "glm-5.2__max" || got["config_name"] != "glm-5.2" {
+		t.Errorf("setModelNameInBody 改错字段: %v", got)
+	}
+	if string(setModelNameInBody(in, "  ")) != string(in) {
+		t.Error("空变体名应是 no-op")
+	}
+}

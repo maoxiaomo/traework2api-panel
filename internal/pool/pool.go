@@ -69,6 +69,14 @@ type Status struct {
 	Degraded     int       `json:"degrade_count,omitempty"` // 降权连败计数
 	InFlight     int       `json:"in_flight,omitempty"`     // 当前在途请求数
 
+	// 额度口径：上游两份计费体系字段不同名也不可换算（见 upstream.entUsagePack）。
+	//   CreditUnit="credit"（国内，默认）：看 Credits/CreditsTotal
+	//   CreditUnit="usd"（国际按量计费）：看 UsedUSD/LimitUSD —— Credits 恒 0
+	// 不填 CreditUnit 时前端按 credit 处理，老数据零回归。
+	CreditUnit string  `json:"credit_unit,omitempty"`
+	UsedUSD    float64 `json:"used_usd,omitempty"`
+	LimitUSD   float64 `json:"limit_usd,omitempty"`
+
 	// 签到域冷却：只挡自动签到轮次，不参与 healthy()/选号。
 	// 签到接口拥塞（9074）不代表对话额度不可用，两者不能混。
 	CheckinCooling bool      `json:"checkin_cooling,omitempty"`
@@ -82,6 +90,11 @@ type entry struct {
 	// creditsTotal 是上游总额（分母），只由余额查询路径写；见 SetCredits。
 	creditsTotal int64
 	expire       int64
+	// 额度口径（见 Status.CreditUnit）：unit 为 upstream.UnitUSD 时用美元那两个字段，
+	// credits 恒 0。三个字段同属「余额快照」，只由 SetBalance 一起写。
+	unit     string
+	usedUSD  float64
+	limitUSD float64
 	// 签到域冷却，与网关冷却（until/reason）分开：前者只挡签到轮次。
 	coolUntil  time.Time
 	coolReason string
@@ -151,23 +164,34 @@ func (e *entry) healthy(now time.Time) bool {
 	return true
 }
 
+// stateAccount 单账号的持久化快照。
+//
+// 以前这段是**三处**抄写的匿名 struct（stateFile 里一次、saveLocked 里两次），
+// 加字段必然漏一处；收成具名类型后只有这一份定义。
+type stateAccount struct {
+	Credits      int64     `json:"credits"`
+	CreditsTotal int64     `json:"credits_total,omitempty"`
+	Expire       int64     `json:"expire,omitempty"`
+	Disabled     bool      `json:"disabled"`
+	Reason       string    `json:"reason,omitempty"`
+	Until        time.Time `json:"until,omitempty"`
+	CoolUntil    time.Time `json:"checkin_until,omitempty"`
+	CoolReason   string    `json:"checkin_reason,omitempty"`
+	// 连败/退避档位要持久化：重启丢掉退避档位等于每次重启都给故障号一次免费重试。
+	Breaker  int `json:"breaker_streak,omitempty"`
+	Soft     int `json:"soft_streak,omitempty"`
+	Degrade  int `json:"degrade_count,omitempty"`
+	SessDead int `json:"session_dead_fails,omitempty"`
+	// 额度口径与美元余额也要持久化：国际版额度是美元，重启后凭 0 积分什么都恢复不出来，
+	// 面板会退回「无额度」。omitempty 让国内号（unit=credit）写出来的文件与以前一致。
+	Unit     string  `json:"credit_unit,omitempty"`
+	UsedUSD  float64 `json:"used_usd,omitempty"`
+	LimitUSD float64 `json:"limit_usd,omitempty"`
+}
+
 // stateFile 持久化格式。
 type stateFile struct {
-	Accounts map[string]struct {
-		Credits      int64     `json:"credits"`
-		CreditsTotal int64     `json:"credits_total,omitempty"`
-		Expire       int64     `json:"expire,omitempty"`
-		Disabled     bool      `json:"disabled"`
-		Reason       string    `json:"reason,omitempty"`
-		Until        time.Time `json:"until,omitempty"`
-		CoolUntil    time.Time `json:"checkin_until,omitempty"`
-		CoolReason   string    `json:"checkin_reason,omitempty"`
-		// 连败/退避档位要持久化：重启丢掉退避档位等于每次重启都给故障号一次免费重试。
-		Breaker  int `json:"breaker_streak,omitempty"`
-		Soft     int `json:"soft_streak,omitempty"`
-		Degrade  int `json:"degrade_count,omitempty"`
-		SessDead int `json:"session_dead_fails,omitempty"`
-	} `json:"accounts"`
+	Accounts map[string]stateAccount `json:"accounts"`
 }
 
 // Pool 账号池。
@@ -497,7 +521,19 @@ func (p *Pool) drawLocked(cands []*entry, now time.Time) *entry {
 // 权重只影响抽中概率，不影响正确性：真正没额度的号会在 1005 时被硬冷却踢出候选。
 func (p *Pool) weight(e *entry, maxCredits int64, now time.Time) float64 {
 	w := 1.0
-	if maxCredits > 0 {
+	switch {
+	case e.unit == "usd" && e.limitUSD > 0:
+		// 美元号（国际版 Free plan 等）：按**剩余额度占比**给分。
+		//
+		// 为什么不能沿用积分那条「占池内最大积分的比例」：单位不可换算，把美元数丢进
+		// 积分口径的比较里没有任何意义。而选号本来就在同 realm 内进行（见 pickLocked 的
+		// realm 过滤），同组内单位必然一致，所以各自口径按自己的占比归一 = 等价且诚实。
+		remain := e.limitUSD - e.usedUSD
+		if remain < 0 {
+			remain = 0
+		}
+		w += remain / e.limitUSD * 10
+	case maxCredits > 0:
 		w += float64(e.credits) / float64(maxCredits) * 10
 	}
 	if p.lim.IdleWeightPerHour <= 0 {
@@ -578,6 +614,46 @@ func (p *Pool) SetCreditsExpire(uid string, credits, total, expire int64) {
 		e.creditsTotal = total
 		e.expire = expire
 	}
+	p.saveLocked()
+}
+
+// Balance 一个账号的额度快照（两种口径二选一，单位见 Unit）。
+//
+// 为什么不合成一个数：国内是积分、国际是美元，上游两套字段不同名（credits_limit vs
+// basic_usage_limit）且**不可换算**。硬折算会造出一个两边都不准的数字。
+type Balance struct {
+	Unit   string // "credit"（默认）| "usd"
+	Remain int64  // 积分口径
+	Total  int64
+	// 美元口径（Unit="usd"）。Free plan 实测 used=0.00059，必须留小数。
+	UsedUSD  float64
+	LimitUSD float64
+}
+
+// SetBalance 写一个账号的额度快照（口径感知版，取代只有积分口径的 SetCreditsExpire）。
+//
+// unit 为空按 credit 处理：签到路径只算积分，走老逻辑不会把国际号写成 usd。
+func (p *Pool) SetBalance(uid string, b Balance, expire int64) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	e, ok := p.byUID[uid]
+	if !ok {
+		return
+	}
+	unit := b.Unit
+	if unit == "" {
+		unit = "credit"
+	}
+	e.unit, e.usedUSD, e.limitUSD = unit, b.UsedUSD, b.LimitUSD
+	if unit == "usd" {
+		// 美元号：credits 留 0（没有积分这回事），余额看 usedUSD/limitUSD。
+		// 不把美元塞进 credits —— 那会让「积分」列显示一个不是积分的数。
+		e.credits, e.creditsTotal = 0, 0
+	} else {
+		e.credits, e.creditsTotal = b.Remain, b.Total
+		e.usedUSD, e.limitUSD = 0, 0
+	}
+	e.expire = expire
 	p.saveLocked()
 }
 
@@ -905,6 +981,9 @@ func (p *Pool) statusOf(uid string, e *entry) Status {
 		Credits:      e.credits,
 		CreditsTotal: e.creditsTotal,
 		Expire:       e.expire,
+		CreditUnit:   e.unit,
+		UsedUSD:      e.usedUSD,
+		LimitUSD:     e.limitUSD,
 		Cooling:      !e.until.IsZero() && now.Before(e.until),
 		Until:        e.until,
 		Reason:       e.reason,
@@ -947,6 +1026,9 @@ func (p *Pool) load() {
 			softStreak:       s.Soft,
 			degradeCount:     s.Degrade,
 			sessionDeadFails: s.SessDead,
+			unit:             s.Unit,
+			usedUSD:          s.UsedUSD,
+			limitUSD:         s.LimitUSD,
 		}
 	}
 }
@@ -955,35 +1037,9 @@ func (p *Pool) saveLocked() {
 	if p.stateFp == "" {
 		return
 	}
-	sf := stateFile{Accounts: map[string]struct {
-		Credits      int64     `json:"credits"`
-		CreditsTotal int64     `json:"credits_total,omitempty"`
-		Expire       int64     `json:"expire,omitempty"`
-		Disabled     bool      `json:"disabled"`
-		Reason       string    `json:"reason,omitempty"`
-		Until        time.Time `json:"until,omitempty"`
-		CoolUntil    time.Time `json:"checkin_until,omitempty"`
-		CoolReason   string    `json:"checkin_reason,omitempty"`
-		Breaker      int       `json:"breaker_streak,omitempty"`
-		Soft         int       `json:"soft_streak,omitempty"`
-		Degrade      int       `json:"degrade_count,omitempty"`
-		SessDead     int       `json:"session_dead_fails,omitempty"`
-	}{}}
+	sf := stateFile{Accounts: map[string]stateAccount{}}
 	for uid, e := range p.byUID {
-		sf.Accounts[uid] = struct {
-			Credits      int64     `json:"credits"`
-			CreditsTotal int64     `json:"credits_total,omitempty"`
-			Expire       int64     `json:"expire,omitempty"`
-			Disabled     bool      `json:"disabled"`
-			Reason       string    `json:"reason,omitempty"`
-			Until        time.Time `json:"until,omitempty"`
-			CoolUntil    time.Time `json:"checkin_until,omitempty"`
-			CoolReason   string    `json:"checkin_reason,omitempty"`
-			Breaker      int       `json:"breaker_streak,omitempty"`
-			Soft         int       `json:"soft_streak,omitempty"`
-			Degrade      int       `json:"degrade_count,omitempty"`
-			SessDead     int       `json:"session_dead_fails,omitempty"`
-		}{
+		sf.Accounts[uid] = stateAccount{
 			Credits:      e.credits,
 			CreditsTotal: e.creditsTotal,
 			Expire:       e.expire,
@@ -996,6 +1052,9 @@ func (p *Pool) saveLocked() {
 			Soft:         e.softStreak,
 			Degrade:      e.degradeCount,
 			SessDead:     e.sessionDeadFails,
+			Unit:         e.unit,
+			UsedUSD:      e.usedUSD,
+			LimitUSD:     e.limitUSD,
 		}
 	}
 	raw, err := json.MarshalIndent(sf, "", "  ")

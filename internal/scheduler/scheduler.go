@@ -219,6 +219,23 @@ func (s *Scheduler) runBalanceLoop(ctx context.Context, interval time.Duration) 
 	}
 }
 
+// entUsageOf 拉一次额度并写进池子，返回**口径感知**的快照。
+//
+// 用 UserEntUsageDetail 而不是老接口 UserEntUsage：国际版是**美元**计费、积分恒 0
+// （2026-10-15 实测 is_dollar_usage_billing=true、basic_usage_limit=1、basic_usage_amount=0.00059），
+// 老接口把国际号的额度一律读成 0，面板就显示成「无额度」——那不是上游的真实状态。
+func (s *Scheduler) entUsageOf(uid string, a *auth.Auth) (upstream.EntUsage, error) {
+	u, err := s.cfg.Upstream.UserEntUsageDetail(a)
+	if err != nil {
+		return u, err
+	}
+	s.cfg.Pool.SetBalance(uid, pool.Balance{
+		Unit: u.Unit, Remain: u.Remain, Total: u.Total,
+		UsedUSD: u.UsedUSD, LimitUSD: u.LimitUSD,
+	}, u.Expire)
+	return u, nil
+}
+
 // RunBalanceRefresh 刷新全部账号的积分与到期时间；返回查询失败的账号数。
 //
 // 与签到的区别：只读余额，不刷 token、**不解冻**。"余额 > 0 就解冻"是签到那一步的语义
@@ -234,12 +251,10 @@ func (s *Scheduler) RunBalanceRefresh() int {
 		if a == nil {
 			continue
 		}
-		remain, total, expire, err := s.cfg.Upstream.UserEntUsage(a)
-		if err != nil {
+		if _, err := s.entUsageOf(st.UID, a); err != nil {
 			failed++
 			continue
 		}
-		s.cfg.Pool.SetCreditsExpire(st.UID, remain, total, expire)
 	}
 	if failed > 0 {
 		log.Printf("balance refresh: %d 个账号查询失败", failed)
@@ -304,9 +319,8 @@ func (s *Scheduler) byUrgency() []string {
 			continue
 		}
 		expire := int64(0)
-		if remain, total, exp, err := s.cfg.Upstream.UserEntUsage(a); err == nil {
-			expire = exp
-			s.cfg.Pool.SetCreditsExpire(st.UID, remain, total, exp)
+		if u, err := s.entUsageOf(st.UID, a); err == nil {
+			expire = u.Expire
 		}
 		rows = append(rows, row{uid: st.UID, expire: expire})
 	}
@@ -360,9 +374,10 @@ func (s *Scheduler) CheckinUID(uid string) (CheckinResult, error) {
 	if a.Realm() == auth.RealmIntl {
 		res.Status = "skipped"
 		res.Reason = "国际版没有签到接口"
-		// 顺手刷一次余额与到期时间（国际版有 v1 积分接口），这一轮不白跑。
-		if remain, total, expire, err := s.cfg.Upstream.UserEntUsage(a); err == nil {
-			s.cfg.Pool.SetCreditsExpire(uid, remain, total, expire)
+		// 顺手刷一次余额与到期时间（国际版有 v1 额度接口），这一轮不白跑。
+		// 走 entUsageOf 才会把美元口径写进去：老接口对国际号恒读成 0 积分。
+		if _, err := s.entUsageOf(uid, a); err != nil {
+			log.Printf("ent-usage(intl) %s: %v", uid, err)
 		}
 		return res, nil
 	}
@@ -436,16 +451,18 @@ func (s *Scheduler) CheckinUID(uid string) (CheckinResult, error) {
 	if checkinErr != nil {
 		res.Reason = checkinErr.Error()
 	}
-	remain, total, expire, err := s.cfg.Upstream.UserEntUsage(a)
+	u, err := s.entUsageOf(uid, a)
 	if err != nil {
 		log.Printf("ent-usage %s: %v", uid, err)
 		return res, err
 	}
 	// 先落余额与到期时间（签到后的新值），再谈解冻/冷却。
-	s.cfg.Pool.SetCreditsExpire(uid, remain, total, expire)
 	// ReenableIfCredits 会在 remain>0 时清网关冷却，即「签到解冻」（改动前即如此）。
 	// 它不碰签到域冷却，所以下面两条路径都不会把签到冷却冲掉。
-	s.cfg.Pool.ReenableIfCredits(uid, remain)
+	//
+	// 这里传积分口径的 u.Remain：签到只存在于国内路径（国际版在本函数开头就 return 了），
+	// 所以拿到的必然是积分口径，美元号的 0 不会走进来。
+	s.cfg.Pool.ReenableIfCredits(uid, u.Remain)
 	if checkinErr == nil {
 		s.cfg.Pool.ClearCheckinCooldown(uid)
 		return res, nil

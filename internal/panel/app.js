@@ -144,15 +144,59 @@ function go(v) {
 }
 
 /* ── 账号池 ───────────────────────────────────────────────────────── */
-// credTitle 积分列提示：解释「0」是什么。
-// 国际版免费号（Free plan，credits_limit=0、按美元计费）恒显示 0——不说明清楚会被当成
-// 「接口坏了/没查到」，而这其实是上游的真实状态（付费国际号会带面额）。
+// 额度口径：上游两套计费体系字段不同名、不可换算（国内积分 / 国际美元）。
+//   isUSD(a) true  → 看 used_usd / limit_usd（国际按量计费，credits 恒 0）
+//   isUSD(a) false → 看 credits / credits_total（国内积分）
+// 未标 credit_unit 的老数据一律当积分，零回归。
+function isUSD(a) {
+  return !!(a && a.credit_unit === 'usd');
+}
+
+// fmtUSD 美元金额。国际版 Free plan 是「$1 免费额度」这种量级，已用量实测 $0.00059：
+// 固定 2 位小数会把已用显示成 0.00，所以最多给到 6 位、去掉多余尾零，最少保 2 位。
+function fmtUSD(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return '$—';
+  const s = n.toFixed(6).replace(/0+$/, '');
+  if (s.endsWith('.')) return '$' + n.toFixed(2);
+  return '$' + (s.includes('.') && s.split('.')[1].length >= 2 ? s : n.toFixed(2));
+}
+
+// usdRemain 剩余美元。
+function usdRemain(a) {
+  return Math.max(0, Number(a && a.limit_usd || 0) - Number(a && a.used_usd || 0));
+}
+
+// credTitle 额度列提示：解释数字是什么、以及「0」是什么。
 function credTitle(a) {
-  if (a.credits_total) return '剩余 / 总额（上游积分包）';
-  if (a.realm === 'intl') return '国际版该账号无积分套餐（Free plan，按量计费）：0 是上游返回的真实值，不是未查询';
+  if (isUSD(a)) {
+    const limit = Number(a.limit_usd || 0), used = Number(a.used_usd || 0);
+    return '国际版按量计费（美元）：已用 ' + fmtUSD(used) + ' / 额度 ' + fmtUSD(limit) +
+      '。上游 is_dollar_usage_billing=true，积分字段（credits_limit）恒 0，' +
+      '所以这一列不能按积分读——免费号是 $1 免费额度，不是无限。';
+  }
+  if (a && a.credits_total) return '剩余 / 总额（上游积分包）';
   return '剩余 / 总额（上游积分包）';
 }
-// 到期列：0 = 上游没给到期信息，不猜。临近/已过期才上标签，正常不动声色。
+// credCell 额度列单元格。
+// 美元号：显示「剩余 / 额度」+ 已用与剩余百分比——只显示美元数会把「$1 里已用 6 分钱」
+// 读成「满额」，百分比才是运维真正要看的那个数。
+function credCell(a) {
+  if (isUSD(a)) {
+    const limit = Number(a.limit_usd || 0);
+    const used = Number(a.used_usd || 0);
+    const remain = usdRemain(a);
+    const pct = limit > 0 ? (remain / limit * 100) : null;
+    return '<div class="n">' + esc(fmtUSD(remain)) +
+      (limit > 0 ? '<span class="tot">/' + esc(fmtUSD(limit)) + '</span>' : '') + '</div>' +
+      '<div class="note">已用 ' + esc(fmtUSD(used)) +
+      (pct == null ? '' : ' · 剩 ' + pct.toFixed(1) + '%') + '</div>';
+  }
+  return '<div class="n">' + (a.credits || 0) +
+    (a.credits_total ? '<span class="tot">/' + a.credits_total + '</span>' : '') + '</div>';
+}
+
+// expCell 到期列：0 = 上游没给到期信息，不猜。临近/已过期才上标签，正常不动声色。
 function expCell(unix) {
   if (!unix) return '<span style="color:var(--ink-3)">—</span>';
   const d = new Date(unix * 1000);
@@ -232,8 +276,7 @@ function renderAccounts(list) {
     return '<tr class="' + cls + '"><td class="mark" aria-hidden="true"><i></i></td>' +
       '<td class="who"><div class="nm">' + (a.realm === 'intl' ? '<span class="tag mute">国际</span> ' : '') + esc(a.nickname || a.uid) + '</div><div class="id">' + esc(a.uid) + '</div></td>' +
       '<td>' + st.join(' ') + '</td>' +
-      '<td class="cred" title="' + esc(credTitle(a)) + '"><div class="n">' + (a.credits || 0) +
-        (a.credits_total ? '<span class="tot">/' + a.credits_total + '</span>' : '') + '</div></td>' +
+      '<td class="cred" title="' + esc(credTitle(a)) + '">' + credCell(a) + '</td>' +
       '<td>' + expCell(a.expire) + '</td>' +
       '<td class="num">' + (a.err_count || 0) + '</td>' +
       '<td class="num" title="累计成功 / 失败（自记录起）">' + (a.success_count || 0) +
@@ -254,9 +297,22 @@ async function loadOverview(quiet) {
     $('sHealthy').textContent = d.healthy;
     $('sCooling').textContent = d.cooling;
     $('sDisabled').textContent = d.disabled;
-    const cSum = list.reduce((s, a) => s + (a.credits || 0), 0);
-    const cTot = list.reduce((s, a) => s + (a.credits_total || 0), 0);
+    const cSum = list.reduce((s, a) => s + (isUSD(a) ? 0 : (a.credits || 0)), 0);
+    const cTot = list.reduce((s, a) => s + (isUSD(a) ? 0 : (a.credits_total || 0)), 0);
     $('sCredits').textContent = cSum + (cTot ? '/' + cTot : '');
+    // 国际版额度是美元，单独一张卡，不并进「积分合计」——两个口径不可换算，
+    // 相加只会得到一个既不是积分也不是美元的假数。没有美元账号就整卡隐藏。
+    const usdAccounts = list.filter(isUSD);
+    const usdLimit = usdAccounts.reduce((s, a) => s + Number(a.limit_usd || 0), 0);
+    const usdUsed = usdAccounts.reduce((s, a) => s + Number(a.used_usd || 0), 0);
+    const usdBox = $('sCreditsUsdBox');
+    if (usdBox) {
+      usdBox.hidden = usdAccounts.length === 0;
+      if (usdAccounts.length) {
+        $('sCreditsUsd').textContent = fmtUSD(Math.max(0, usdLimit - usdUsed)) + '/' + fmtUSD(usdLimit);
+        usdBox.title = usdAccounts.length + ' 个国际账号（按量计费，美元）· 已用 ' + fmtUSD(usdUsed);
+      }
+    }
     $('sCheckin').textContent = list.filter(a => a.checkin_cooling && !a.disabled).length;
     $('navSub').textContent = 'v' + d.version;
     $('navVer').textContent = 'v' + d.version;
@@ -1252,7 +1308,11 @@ function pkExpiryDateTime(expiresAt) {
 }
 
 // pkAccountSegments 账号内先按总余额约束逐包金额（上游可能重复记录），再按到期时间排序。
+//
+// 只做**积分**口径：到期分布图是按包面额加总画出来的，把美元数加进去会得到一个
+// 既不是积分也不是美元的假和。美元账号直接返回空数组，由 summarizeCreditDays 单列计数。
 function pkAccountSegments(a, now) {
+  if (isUSD(a)) return [];
   let balance = Math.max(0, Number(a.remain || 0));
   const out = [];
   for (const p of a.packages || []) {
@@ -1281,7 +1341,10 @@ function pkAccountSegments(a, now) {
 function summarizeCreditDays(list, now) {
   const buckets = new Map();
   let unavailable = 0;
+  let usdCount = 0;
   for (const a of list || []) {
+    // 美元账号不进积分图，也不算「未获取余额」——它的余额是拿到了，只是不是积分。
+    if (isUSD(a)) { usdCount++; continue; }
     if (a.error || !Number.isFinite(Number(a.remain))) { unavailable++; continue; }
     for (const segment of pkAccountSegments(a, now)) {
       if (segment.days == null) continue;
@@ -1298,7 +1361,7 @@ function summarizeCreditDays(list, now) {
       a.accountName.localeCompare(b.accountName) ||
       a.source.localeCompare(b.source));
   }
-  return { rows, accountCount: (list || []).length, unavailable };
+  return { rows, accountCount: (list || []).length, unavailable, usdCount };
 }
 
 function renderExpiryDistribution(list, now) {
@@ -1321,7 +1384,8 @@ function renderExpiryDistribution(list, now) {
       '</b></div>';
   }).join('');
   const foot = summary.accountCount + ' 个账号' +
-    (summary.unavailable ? ' · ' + summary.unavailable + ' 个未获取余额' : '');
+    (summary.unavailable ? ' · ' + summary.unavailable + ' 个未获取余额' : '') +
+    (summary.usdCount ? ' · ' + summary.usdCount + ' 个国际账号按美元计费，不计入本图（见逐包明细）' : '');
   const legend = (list || []).filter(a =>
     a && !a.error && a.uid && pkAccountSegments(a, now).some(s => s.days != null)
   ).map(a => '<span><i style="background:' + (colors.get(String(a.uid)) || 'var(--accent)') +
@@ -1336,7 +1400,7 @@ function renderExpiryDistribution(list, now) {
 
 // pkDetailCompare 单账号逐包明细排序：到期时间升序，同一到期按面额降序。
 function pkDetailCompare(a, b) {
-  const sizeOf = p => { const n = Number(p && p.size); return Number.isFinite(n) ? n : 0; };
+  const sizeOf = p => { const n = pkSize(p); return Number.isFinite(n) ? n : 0; };
   const ea = pkExpiryMs(a), eb = pkExpiryMs(b);
   if (ea == null && eb != null) return 1;
   if (ea != null && eb == null) return -1;
@@ -1346,13 +1410,22 @@ function pkDetailCompare(a, b) {
 
 // pkDetailGroups 正余额包先按到期时间挑默认展示项，其余正余额包与已用完包分别折叠。
 const PK_DEFAULT_DETAIL_LIMIT = 5;
+// ── 额度包的口径读取 ──
+// 包数组来自 /panel/api/packages：国内包填 remain/used/size（积分），国际包填
+// remain_usd/used_usd/limit_usd（美元）。各取各的，绝不互相兜底——把 0 当值会让
+// 国际包被判成「已用完」，把美元当积分会让数字失去意义。
+function pkIsUSD(p) { return !!(p && p.unit === 'usd'); }
+function pkRemain(p) { return Number(pkIsUSD(p) ? (p.remain_usd || 0) : (p.remain || 0)); }
+function pkSize(p) { return Number(pkIsUSD(p) ? (p.limit_usd || 0) : (p.size || 0)); }
+function pkAmount(p, v) { return pkIsUSD(p) ? fmtUSD(v) : fmtTok(v); }
+
 function pkDetailGroups(packs, limit) {
   const active = [], used = [];
   let usedSize = 0, restSize = 0, restRemain = 0;
   for (const p of packs || []) {
-    if (Number(p && p.remain) > 0) { active.push(p); continue; }
+    if (pkRemain(p) > 0) { active.push(p); continue; }
     used.push(p);
-    const size = Number(p && p.size);
+    const size = pkSize(p);
     if (Number.isFinite(size)) usedSize += size;
   }
   active.sort(pkDetailCompare);
@@ -1361,8 +1434,8 @@ function pkDetailGroups(packs, limit) {
   const visible = active.slice(0, n);
   const rest = active.slice(visible.length);
   for (const p of rest) {
-    restSize += Number(p.size || 0);
-    restRemain += Number(p.remain || 0);
+    restSize += pkSize(p);
+    restRemain += pkRemain(p);
   }
   return { visible, rest, used, restSize, restRemain, usedSize };
 }
@@ -1427,13 +1500,14 @@ function renderPackages(d) {
     const rowOf = (p, rowGroup) => {
       const k = (p.group || '') + '|' + (p.name || '(未命名)');
       const sub = p.group && p.group !== p.name ? p.group : '';
+      const usd = pkIsUSD(p);
       return '<tr' + (rowGroup ? ' class="pk-hidden-row" data-pk-row="' + rowGroup + '" hidden' : '') +
         '><td class="mark" aria-hidden="true"><i style="background:' + colorOf(k) + '"></i></td>' +
         '<td>' + esc(p.name || p.group || '(未命名)') +
         (sub ? '<div class="note">' + esc(sub) + '</div>' : '') + '</td>' +
-        '<td class="num">' + fmtTok(p.size) + '</td>' +
-        '<td class="num">' + fmtTok(p.remain) + '</td>' +
-        '<td class="num">' + fmtTok(p.used) + '</td>' +
+        '<td class="num">' + pkAmount(p, pkSize(p)) + '</td>' +
+        '<td class="num">' + pkAmount(p, pkRemain(p)) + '</td>' +
+        '<td class="num">' + pkAmount(p, usd ? (p.used_usd || 0) : (p.used || 0)) + '</td>' +
         '<td class="num">' + (p.start ? esc(pkExpiryDateTime(Number(p.start) * 1000).slice(0, 10)) : '—') + '</td>' +
         '<td class="num">' + (p.expire ? esc(pkExpiryDateTime(Number(p.expire) * 1000).slice(0, 10)) : '—') + '</td>' +
         '</tr>';
@@ -1442,22 +1516,31 @@ function renderPackages(d) {
       '<tr class="pk-group-summary"><td colspan="7"><button type="button" class="pk-group-toggle"' +
       ' data-pk-group="' + group + '" data-count="' + count + '" data-size="' + size +
       '" data-remain="' + remain + '" aria-expanded="false">' + label + '，展开</button></td></tr>';
+    const anyUSD = (a.packages || []).some(pkIsUSD);
+    const amt = v => (anyUSD ? fmtUSD(v) : fmtTok(v));
     const rows = groups.visible.map(p => rowOf(p, '')).join('');
     const restSummary = groups.rest.length
       ? groupSummary('rest', '其余未用完 ' + groups.rest.length + ' 个包（面额合计 ' +
-        fmtTok(groups.restSize) + ' · 剩余 ' + fmtTok(groups.restRemain) + '）',
+        amt(groups.restSize) + ' · 剩余 ' + amt(groups.restRemain) + '）',
         groups.rest.length, groups.restSize, groups.restRemain) +
       groups.rest.map(p => rowOf(p, 'rest')).join('')
       : '';
     const usedSummary = groups.used.length
       ? groupSummary('used', '已用完 ' + groups.used.length + ' 个包（面额合计 ' +
-        fmtTok(groups.usedSize) + '）', groups.used.length, groups.usedSize, 0) +
+        amt(groups.usedSize) + '）', groups.used.length, groups.usedSize, 0) +
       groups.used.map(p => rowOf(p, 'used')).join('')
       : '';
+    // 余额汇总按账号口径显示：美元号给 $已用 / $额度 + 剩余占比，积分号照旧。
+    const headAmount = isUSD(a)
+      ? '已用 ' + fmtUSD(a.used_usd || 0) + ' / 额度 ' + fmtUSD(a.limit_usd || 0) +
+        ' · 剩余 ' + fmtUSD(usdRemain(a)) +
+        (Number(a.limit_usd || 0) > 0 ? '（' + (usdRemain(a) / Number(a.limit_usd) * 100).toFixed(1) + '%）' : '')
+      : '余额 ' + fmtTok(a.remain) + ' / 总额 ' + fmtTok(a.size);
     return '<div class="box"><header><h3>' +
       esc(a.nickname || String(a.uid || '').slice(0, 8)) + ' · ' + esc(a.realm || '') +
-      '</h3><span class="grow"></span><span class="note">余额 ' + fmtTok(a.remain) +
-      ' / 总额 ' + fmtTok(a.size) + ' · 可用 ' + (groups.visible.length + groups.rest.length) + ' 个包' +
+      (isUSD(a) ? ' · 按量计费(美元)' : '') +
+      '</h3><span class="grow"></span><span class="note">' + headAmount +
+      ' · 可用 ' + (groups.visible.length + groups.rest.length) + ' 个包' +
       (groups.used.length ? ' / 已用完 ' + groups.used.length + ' 个' : '') +
       ' · 默认展示最早到期 ' + PK_DEFAULT_DETAIL_LIMIT + ' 条</span>' +
       '</header><div class="tbl-wrap"><table class="acc"><thead><tr>' +
@@ -1678,8 +1761,13 @@ function checkinMsg(rs, accounts) {
         toast(r.status === 'already' ? '今天已经签过了'
           : (r.earned ? '签到完成 +' + r.earned + ' 分' : '签到完成，本次没有新增积分'), 'ok');
       } else if (a === 'balance') {
-        toast('积分已刷新' + (r.account ? '，积分包 ' + r.account.credits +
-          (r.account.credits_total ? '/' + r.account.credits_total : '') : ''), 'ok');
+        // 单号刷新：按账号自己的口径回报，美元号不能回一个 0 积分。
+        const acc = r.account;
+        toast('额度已刷新' + (acc
+          ? (isUSD(acc)
+            ? '，已用 ' + fmtUSD(acc.used_usd || 0) + ' / 额度 ' + fmtUSD(acc.limit_usd || 0)
+            : '，积分包 ' + acc.credits + (acc.credits_total ? '/' + acc.credits_total : ''))
+          : ''), 'ok');
       } else if (a === 'clear-cooldown') toast('已解除冷却', 'ok');
       else if (a === 'rotate-device') toast('已换设备指纹' + (r.device_id ? '：' + r.device_id : ''), 'ok');
       else if (a === 'disable') toast('已禁用', 'ok');

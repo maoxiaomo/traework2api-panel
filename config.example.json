@@ -22,7 +22,12 @@
     "header_timeout_seconds": 120,
     "idle_timeout_seconds": 300,
     "user_agent": "",
-    "client_version": ""
+    "client_version": "",
+    "host_discovery": true,
+    "host_discovery_hours": 6,
+    "agent_host": "",
+    "agent_host_intl": "",
+    "max_function": "chat_v3"
   },
   "pool": {
     "max_in_flight": 3,

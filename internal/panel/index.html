@@ -658,6 +658,9 @@ legend { font-size: 12px; color: var(--ink-3); font-weight: 600; padding-bottom:
         <div class="stat warn"><div class="v" id="sCooling">-</div><div class="k">冷却中</div></div>
         <div class="stat bad"><div class="v" id="sDisabled">-</div><div class="k">已禁用</div></div>
         <div class="stat"><div class="v" id="sCredits">-</div><div class="k">积分合计</div></div>
+        <!-- 国际版不是「无限免费」：Free plan 走美元计量（实测 basic_usage_limit=1 即 $1 额度）。
+             单列一张卡，不把美元并进「积分合计」——两种单位不可换算。无美元账号时整卡隐藏。 -->
+        <div class="stat" id="sCreditsUsdBox" hidden><div class="v" id="sCreditsUsd">-</div><div class="k">国际额度（美元）</div></div>
         <div class="stat warn"><div class="v" id="sCheckin">-</div><div class="k">签到冷却</div></div>
       </div>
 

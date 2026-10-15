@@ -6,10 +6,32 @@
 package upstream
 
 const (
-	AgentHost   = "https://trae-api-cn.mchost.guru"
+	// AgentHost 对话/模型表的 agent 网关。
+	//
+	// 2026-10-15 实测：合并后的官方客户端（Trae CN 1.1.3，build 2026-10-09，
+	// TraeWork 与 TraeCode 已合一）全量改走 api5-normal；trae-api-cn 仍是**活着**的
+	// 遗留入口（未鉴权探测两条 host 的 EpChat/EpModels 都回 401 code:1001，不是 404），
+	// 旧域名只剩新客户端 referer 里的残留，所以这次是「早改无害」而非救火。
+	//
+	// 同批实测对拍（真 token）：两条 host × 两套身份版本（0.1.50/20260811 与
+	// 3.4.2/20260924）× 单 function 表 / 7-function 批量表，全部 200 且逐字一致
+	// （46 条 / 7 函数面 437 条 / client_config 3203B）；明文请求体在 api5-normal 上
+	// 照常出完整 SSE 正文 —— 官方客户端的 x-medusa/x-helios 请求体加密**不是强制项**。
+	// 新域名 SSE 每帧多一行 `id:N`，两个解析器（solosse.go scanLine / continue.go step）
+	// 都只认 event:/data:/: 前缀，该行被忽略，无需改动。
+	AgentHost   = "https://api5-normal.mchost.guru"
 	UgHost      = "https://api.trae.cn"
 	OAuthHost   = "https://api.trae.com.cn"
 	ConsoleHost = "https://www.trae.cn"
+	// ClientID 保持 SOLO 档，**不要**改成 IDE 档的 ono9krqynydwx5。
+	//
+	// 2026-10-15 实测：refresh token 与 ClientID **严格绑定**。同一枚令牌，
+	// 配对正确 → 200；跨档配对 → 400 10101「无效参数」。2×2 全交叉矩阵在两个
+	// host 上、正序倒序各跑一遍，结果一致（BoundDeviceID 也分档：SOLO 28x5y7nrx6rlq5 /
+	// IDE 6194p600l8je46）。
+	// ⇒ 本仓所有已有账号的 token 都是 SOLO 档登录铸出来的，改成 IDE 档会让**全部账号**
+	// 换票失败。SOLO 档本身健在：GetPCAuthCode 两档都 200，伪造 client_id 才 400
+	// 「Invalid client.」（有区分力的对照）。
 	ClientID    = "en1oxy7wnw8j9n" // SOLO stable
 	AppID       = "6eefa01c-1036-4c7e-9ca5-d891f63bfcd8"
 	// IdeVersionCode 是上游的**放量开关**，不是装饰：

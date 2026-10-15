@@ -67,6 +67,20 @@ type Config struct {
 		UserAgent string `json:"user_agent"`
 		// ClientVersion Trae 客户端版本段（出站 UA 与 X-Ide-Version）；空 = 内置默认。
 		ClientVersion string `json:"client_version"`
+		// HostDiscovery 是否按 TNC 域名下发自动跟进 agent 基址（默认开，见
+		// internal/upstream/domains.go）。关掉 = 只用 agent_host / 内置常量。
+		HostDiscovery bool `json:"host_discovery"`
+		// HostDiscoveryHours 自动跟进的刷新周期（小时，默认 6）。改了需重启（ticker 启动时定）。
+		HostDiscoveryHours int `json:"host_discovery_hours"`
+		// AgentHost / AgentHostIntl 显式钉死 agent 基址（非空则优先于自动发现；
+		// 留空 = 交给自动发现，发现失败回落内置常量）。热生效。
+		AgentHost     string `json:"agent_host"`
+		AgentHostIntl string `json:"agent_host_intl"`
+		// MaxFunction 开启 Max 上下文时出站 function 换成哪个上游面（默认 chat_v3）。
+		// 换面的原因见 internal/server/handler.go 的 Config.MaxFunction 注释：
+		// Max 的大窗口只在 chat_v3 / solo_agent* 上被声明，面板默认面 solo_work_lite 没有。
+		// 热生效。
+		MaxFunction string `json:"max_function"`
 	} `json:"upstream"`
 
 	Pool struct {
@@ -146,6 +160,10 @@ func Default() *Config {
 	c.Schedule.BalanceRefreshEnabled = true
 	c.Schedule.BalanceRefreshMinutes = 5
 	c.Upstream.TimeoutSeconds = 120
+	// 域名自动跟进缺省开：上游换域名时面板自己能跟上（见 internal/upstream/domains.go）。
+	// 与 schedule 那几个开关同一套「缺省 true 靠这里赋值、JSON 显式 false 才关」的写法。
+	c.Upstream.HostDiscovery = true
+	c.Upstream.HostDiscoveryHours = 6
 	c.Pool.MaxInFlight = 3
 	c.Pool.BreakerThreshold = 3
 	c.Pool.BreakerCooldown = "10m"
@@ -390,6 +408,15 @@ func (c *Config) normalize() error {
 	if c.Upstream.IdleTimeoutSeconds <= 0 {
 		c.Upstream.IdleTimeoutSeconds = 300
 	}
+	// 域名刷新周期：0 是「没填」而不是「立即/关闭」，与 timeout 那组同理，缺省补 6 小时。
+	if c.Upstream.HostDiscoveryHours <= 0 {
+		c.Upstream.HostDiscoveryHours = 6
+	}
+	// Max 面缺省补 chat_v3：MAX_FUNCTION 空串是「没填」，不是「不换面」——
+	// 不换面就等于 Max 永远不生效（面板默认面上游没声明大窗口），那是个静默失效的坑。
+	if strings.TrimSpace(c.Upstream.MaxFunction) == "" {
+		c.Upstream.MaxFunction = "chat_v3"
+	}
 	if c.DefaultModel == "" {
 		c.DefaultModel = "glm-5.2"
 	}
@@ -537,6 +564,14 @@ func RestartFields(bound, next *Config) []string {
 		next.Logging.RequestArchiveRetentionDays != bound.Logging.RequestArchiveRetentionDays ||
 		next.Logging.RequestArchiveMaxMB != bound.Logging.RequestArchiveMaxMB {
 		out = append(out, "logging.request_archive")
+	}
+	// 域名自动跟进的开关与周期：ticker 是启动时起的，改周期要重启；
+	// 开/关同理（只影响是否起这个 goroutine）。agent_host 那两个是热项（applyUpstream 里生效）。
+	if next.Upstream.HostDiscovery != bound.Upstream.HostDiscovery {
+		out = append(out, "upstream.host_discovery")
+	}
+	if next.Upstream.HostDiscoveryHours != bound.Upstream.HostDiscoveryHours {
+		out = append(out, "upstream.host_discovery_hours")
 	}
 	return out
 }

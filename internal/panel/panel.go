@@ -222,6 +222,17 @@ func (p *Panel) writeOverview(w http.ResponseWriter, extra map[string]any) {
 			break
 		}
 	}
+	// agent 基址现状：上游换域名时这里是第一现场（自动发现 > 显式配置 > 内置常量）。
+	hostInfo := map[string]any{}
+	if p.cfg.Upstream != nil {
+		cn, intl, source, at := p.cfg.Upstream.AgentHosts()
+		hostInfo["agent_host_cn"] = cn
+		hostInfo["agent_host_intl"] = intl
+		hostInfo["agent_host_source"] = source
+		if !at.IsZero() {
+			hostInfo["agent_host_discovered_at"] = at.Format(time.RFC3339)
+		}
+	}
 	body := map[string]any{
 		"version":       p.cfg.Version,
 		"uptime_sec":    int(time.Since(p.started).Seconds()),
@@ -232,6 +243,9 @@ func (p *Panel) writeOverview(w http.ResponseWriter, extra map[string]any) {
 		"disabled":      disabled,
 		"usage_hours":   usagePanelHours,
 		"accounts":      rows,
+	}
+	for k, v := range hostInfo {
+		body[k] = v
 	}
 	for k, v := range extra {
 		body[k] = v
@@ -264,37 +278,45 @@ func (p *Panel) models(w http.ResponseWriter, r *http.Request) {
 
 // packages 返回全部账号的积分包构成，供「积分构成」视图对比。
 // 逐账号**实时**查上游（同 balanceAll 的口径），失败的单列出来不拖累其余账号——
-// 一个号凭证过期不该让整页空白。国际版免费号没有积分套餐（只有一条 credits_limit=0 的
-// Free plan），返回空列表 + 0/0，由前端显示「无积分套餐」。
+// 一个号凭证过期不该让整页空白。
+//
+// 口径感知：国内返回积分包（remain/size 是积分），国际返回美元包（remain_usd/limit_usd）。
+// 实测国际 Free plan 就是一条 basic_usage_limit=1（$1）、已用 $0.00059 的包，
+// 老代码只认 credits_limit 会把它整条跳过 → 面板显示「无积分套餐」，那是假象。
 func (p *Panel) packages(w http.ResponseWriter, r *http.Request) {
 	type item struct {
 		UID      string                   `json:"uid"`
 		Nickname string                   `json:"nickname,omitempty"`
 		Realm    string                   `json:"realm,omitempty"`
+		Unit     string                   `json:"unit"` // credit | usd
 		Remain   int64                    `json:"remain"`
 		Size     int64                    `json:"size"`
+		UsedUSD  float64                  `json:"used_usd,omitempty"`
+		LimitUSD float64                  `json:"limit_usd,omitempty"`
 		Packages []upstream.CreditPackage `json:"packages"`
 		Error    string                   `json:"error,omitempty"`
 	}
 	list := p.cfg.Pool.List()
 	out := make([]item, 0, len(list))
 	for _, st := range list {
-		it := item{UID: st.UID, Nickname: st.Nickname, Realm: st.Realm, Packages: []upstream.CreditPackage{}}
+		it := item{UID: st.UID, Nickname: st.Nickname, Realm: st.Realm,
+			Unit: upstream.UnitCredit, Packages: []upstream.CreditPackage{}}
 		a := p.cfg.Pool.AuthByUID(st.UID)
 		if a == nil {
 			it.Error = "凭证不可用"
 			out = append(out, it)
 			continue
 		}
-		packs, remain, size, err := p.cfg.Upstream.CreditPackages(a)
+		packs, u, err := p.cfg.Upstream.BalancePackages(a)
 		if err != nil {
 			it.Error = err.Error()
 			out = append(out, it)
 			continue
 		}
 		it.Packages = packs
-		it.Remain = remain
-		it.Size = size
+		it.Unit = u.Unit
+		it.Remain, it.Size = u.Remain, u.Total
+		it.UsedUSD, it.LimitUSD = u.UsedUSD, u.LimitUSD
 		out = append(out, it)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"accounts": out})
@@ -623,11 +645,16 @@ func (p *Panel) refreshBalance(uid string) error {
 	if a == nil {
 		return scheduler.ErrNotFound
 	}
-	remain, total, expire, err := p.cfg.Upstream.UserEntUsage(a)
+	// 口径感知：国内写积分、国际写美元。老接口 UserEntUsage 对国际号恒返回 0，
+	// 面板就会显示成「无额度」——实测国际 Free plan 有 $1 额度、已用 $0.00059。
+	u, err := p.cfg.Upstream.UserEntUsageDetail(a)
 	if err != nil {
 		return err
 	}
-	p.cfg.Pool.SetCreditsExpire(uid, remain, total, expire)
+	p.cfg.Pool.SetBalance(uid, pool.Balance{
+		Unit: u.Unit, Remain: u.Remain, Total: u.Total,
+		UsedUSD: u.UsedUSD, LimitUSD: u.LimitUSD,
+	}, u.Expire)
 	return nil
 }
 

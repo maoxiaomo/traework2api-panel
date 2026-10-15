@@ -82,6 +82,14 @@ TRAE 登录页强制回调 `127.0.0.1`，但浏览器与服务器不需要同机
 #    → 落盘 auths/trae-{uid}.json → 自动签到 + 查积分 → 重启容器加载新账号
 ```
 
+**`ClientID` 与账号强绑定，别改**（2026-10-15 实测）：`refresh token` 是**按 `ClientID` 铸**的，
+换票时两者必须同档，跨档一律 `10101 无效参数`（2×2 全交叉矩阵在两个 host 上、正序倒序各跑一遍，
+结果一致；`BoundDeviceID` 也分档）。本仓所有账号都是 `en1oxy7wnw8j9n`（SOLO 档）铸的，
+所以 `upstream.ClientID` / `login.sh` 的 `CLIENT_ID` / 登录页 `client_id` **三处必须保持一致**，
+任意一处漂到 IDE 档的 `ono9krqynydwx5` 都会让**全部已有账号**换票失败。
+该档位本身健在：`GetPCAuthCode` 用 SOLO 档与 IDE 档都返回 200，只有伪造的 client_id 才
+`400 Invalid client.`（对照有区分力）。
+
 ## 本机运行（非 Docker）
 
 ```bash
@@ -156,6 +164,134 @@ git tag "v$VERSION" && git push origin "v$VERSION"
 `TW2A_PROBE_CHAT=1 go test ./internal/upstream -run TestProbeLiveBilling -v`。
 该笔记另称 ent usage 聚合的包**含 work 包**（即「显示 remain=2000 其实是 work_credits」）：本仓**未复核**
 （接口只给汇总，`./credit.sh` 拿不到包级数值），所以别据此改选号口径。
+
+### agent 域名是上游下发的（换域名时先看这里）
+
+**上游会换 agent 域名，而且面板看不出征兆**：官方客户端从不写死具体后端，它请求一个**逻辑主机名**
+（国服 `trae-api-cn.mchost.guru`，国际 `coresg-normal.trae.ai`），由 TTNet 的 dispatcher 按 TNC 下发的
+域名表在**传输层**改写成 `api<N>-normal[-<region>].mchost.guru` 再发出去。所以同一个客户端，`referer`
+里写着旧域名，实际打的是新域名 —— 2026-10-15 国服那轮改动就是这么发生的（`trae-api-cn` →
+`api5-normal`，客户端 `referer` 至今还是旧名）。
+
+本仓是纯 Go HTTP、不走 TTNet，默认**自己把那表拉回来解析**（`internal/upstream/domains.go`）：
+
+1. `GET https://tnc0-aliec2.zijieapi.com/get_domains/v5/`（国服）/ `https://tnc-boot.trae.ai/...`（国际）
+   —— 无需鉴权。注意 `cronet_version` / `ttnet_version` 两个参数**不能省**，省了返回 0 条规则。
+2. 从 `data.ttnet_dispatch_actions[].param.host_group[]` 里挑出候选：国服 = 无区域段
+   （`api5-normal.mchost.guru`），国际 = 带区域段（`api22-normal-alisg.mchost.guru`）。
+   同表的 `trae-api-cn.mchost.guru` 之类**不是**分片后端，会被排除。
+3. 逐个探活（POST `/api/ide/v1/get_detail_param` 发最小报文，**拿到任何 HTTP 响应即算活** —— 401 也
+   证明路由存在），取第一个可用的；全部失败就沿用现有值，最终回落 `constants.go` 的常量。
+   发现机制自己坏掉**不影响出流**。
+
+配置与开关：
+
+| 键 | 默认 | 说明 |
+|---|---|---|
+| `upstream.host_discovery` | `true` | 关掉 = 只用 `agent_host` / 内置常量 |
+| `upstream.host_discovery_hours` | `6` | 刷新周期。改了**需重启**（ticker 启动时定） |
+| `upstream.agent_host` | `""` | 显式钉死国服基址，非空则优先于自动发现（热生效） |
+| `upstream.agent_host_intl` | `""` | 同上，国际版 |
+
+排查时先看两个地方：
+
+```bash
+# 1) 面板首屏 JSON（/panel/api/overview）——agent_host_source 是 auto/内置，看它是不是「自动发现」
+curl -s http://127.0.0.1:7864/panel/api/overview | python3 -c 'import json,sys;d=json.load(sys.stdin);print({k:v for k,v in d.items() if "agent_host" in k})'
+
+# 2) 启动日志：每次发现成功/失败/换域名都有一行 [domains]
+grep '\[domains\]' <面板日志>
+```
+
+`agent_host_source` 长期是「内置常量/显式配置」而不是「自动发现」，或者日志里反复出现
+「域名表获取失败」，说明 TNC 接口或 boot 主机也变了 —— 那时候要改的是 `domains.go` 里的
+`tncBootHosts` / `domainQuery`，而不是 `constants.go` 的常量。
+
+已实测（2026-10-15，两区真 token）：两条域名下的 agent 基址**同时可用**，模型表逐字一致，
+所以自动发现是「跟着上游走」而不是「不换就坏」；换域名那次也是旧域名仍返回 401 而非 404
+（属于遗留入口，给运维留了观察窗口）。
+
+## Max 上下文（1M 档）
+
+客户端模型选择器里每个模型都有一个「Max 上下文」开关（关着时窗口 116k/200k/256k，开着 1M）。
+面板把这条通道做出来了，**默认关闭**——与客户端一致（客户端开着时也会提示「更多积分消耗」）。
+
+### 怎么开
+
+两种写法等价，任选：
+
+```bash
+# 1) 请求体加一个字段（OpenAI 客户端忽略未知字段，不会报错）
+curl -s http://127.0.0.1:7864/v1/chat/completions -H 'Content-Type: application/json' -d '{
+  "model": "cn:glm-5.2", "max_context": true,
+  "messages": [{"role":"user","content":"hi"}]}'
+
+# 2) 模型名带上游内部后缀（客户端原生写法）
+curl ... -d '{"model":"cn:glm-5.2__max","messages":[...]}'
+```
+
+`/v1/models` 里每个模型会如实带上可用性，客户端可据此决定要不要开：
+
+| 字段 | 含义 |
+|---|---|
+| `context_length` | 默认档窗口（`__dev` 实际请求口径） |
+| `context_length_max` | 上游**声明**的 Max 口径 |
+| `max_available` | `true` = 这个模型真能开 Max（有 `__max` 变体**且**窗口确实变大） |
+| `max_model` | 出站要用的变体名（形如 `glm-5.2__max`） |
+
+当前国服 32 个模型里 **20 个** `max_available=true`。`Doubao-Seed-2.1-Turbo` 这类上游给了
+`__max` 名字但窗口没变大的，**报 false** —— 开了也不增长，报 true 就是骗客户端。
+
+### 为什么要换 `function`
+
+Max 变体只在部分上游面上**声明**了更大的窗口（2026-10-15 全表实测 782 条明细）：
+
+| function 面 | 带 `__max` 条目 | 其中窗口更大 | 默认档 `dev` |
+|---|---|---|---|
+| `solo_work_lite`（面板默认面） | 12 | **0** | 200000 |
+| `solo_coder` | 36 | **0** | 200000 |
+| **`chat_v3`**（Max 面，默认） | 20 | **20** | 116000 |
+| `solo_agent` / `_lite` / `_remote` | 54/39/31 | 44/36/36 | 200000 |
+
+所以开 Max 时出站 `function` 会换到 `chat_v3`（`upstream.max_function` 可改，热生效）。
+换面不影响可调用性 —— 本仓 2026-10-04 已实测 function 不是约束（4 模型 × 4 轴 16/16 全 200）。
+
+想要「200k 默认档 + 1M Max」的话把 `max_function` 设成 `solo_agent` 或 `solo_agent_lite`。
+
+### 上游没给 Max 时
+
+如实忽略并留一行 `WARN: [max] <模型> 没有更大的 Max 窗口…`，**不换 model、不换 function、不报错**，
+请求照常成功。宁可少一个开关，不硬发一个上游认不出的名字。
+
+### 一个坑：变体名必须从上游表里读，不能拼
+
+`model = config_name + "__max"` 是错的。全表 417 条带后缀的变体名里 **99 条不满足**这个规律：
+
+```
+search_agent_qwen_fast → search_agent_model__max   （多个 config 共用一个变体名）
+glm-5.2_advisor_doubao → glm-5.2__dev             （advisor 槽位复用基础模型的变体名）
+custom_model_kimi      → custom_model_placeholder__dev
+```
+
+拼出来的名字上游认不出，失败形态是「静默按 dev 行为跑」—— 客户端以为开了 1M，实际还是 116k。
+代码只存**读到的原值**（`upstream.variantNames`），取不到就是空串，绝不猜。
+回归测试用的是真抓包夹具 `internal/upstream/testdata/batch_max_variants.json`。
+
+### 已实测 / 未实测（如实分列）
+
+已实测（2026-10-15，真 token）：
+
+- 出站报文：`config_name` 留裸名、`model` 填变体名、`function` 换 `chat_v3`，日志有 `[max]` 行。
+- 面 × 变体 6 格矩阵（`solo_work_lite`/`chat_v3` × `__dev`/`__max`/裸名）**全部 200 且正文正确**。
+- 面板端到端 13 次调用（默认档 6 次 / Max 档 7 次，含带与不带 `max_tokens`），除下述两次异常外全部正常。
+
+**未实测：1M 窗口本身没有被验证。** 上游表里 `context_window_tokens.max = 1000000` 是**声明**，
+客户端侧看不到实际生效窗口。要证实得发一段超过默认档（116000 token）的输入，约需 100 积分 ——
+没做，别把声明当实测。
+
+**观察到的异常（未复现，留档）**：首轮面板 E2E 里两次 Max 调用出现一次英文胡话、一次正文为空
+且烧掉 16000 个推理 token（正好是 Max 档输出上限）。随后按同样条件重跑 3 次 dev + 3 次 max 全部正常，
+2×2 上游矩阵也全正常，**复现不出来**。原因未明，可能是上游瞬时状态或满预算的思考跑飞，继续观察。
 
 ## 保活（防掉线）
 
@@ -324,11 +460,69 @@ Spearman 相关系数（真按档位调档应该接近 `+1`）。14 个会思考
 
 | 面 | 国内版 | 国际版 |
 |---|---|---|
-| agent host（对话 / 模型表） | `trae-api-cn.mchost.guru` | `a0ai-api-sg.byteintlapi.com` |
+| agent host（对话 / 模型表） | `api5-normal.mchost.guru`（2026-10-15 起；旧的 `trae-api-cn.mchost.guru` 仍活但已是遗留入口） | `a0ai-api-sg.byteintlapi.com` |
 | OAuth host | `api.trae.com.cn` | 登录回调里的 `host` 参数（本次实测 `api-sg-central.trae.ai`） |
 | 登录页 | `www.trae.cn/authorization` | `www.trae.ai/authorization`（同参数集，`x_app_version=1.0.2`） |
 | 模型名 | `glm-5.2` / `kimi-k2.6` … | `gpt-5.2` / `gpt-5.4` / `kimi-k3`（`gpt-6-sol`/`gpt-6-luna` 见下） |
-| 签到 / 积分 | `/trae/api/v2/ug/*` | **没有**：两个国际域上都是 404，国际账号跳过签到与余额刷新 |
+| 签到 / 积分 | `/trae/api/v2/ug/*` | 签到**没有**（两个国际域上 404，国际账号跳过签到）；额度接口**有**，见下 |
+
+### 国际版是**美元**计费，不是「免费无限」
+
+> 2026-10-15 更正：本节此前写「国际版没有积分接口、跳过余额刷新」，**是错的**。
+> 真相是国际账号**有**额度接口，只是口径与国内不是同一套——拿积分字段去读它，读出来是 0，
+> 于是面板显示「无额度」，看起来像接口坏了。
+
+上游在同一族接口上按账号返回两套计费体系，靠顶层 `is_dollar_usage_billing` 区分
+（实测：国内 `false` + `is_credits_billing:true`；国际 `true`）：
+
+| | 国内版 | 国际版 |
+|---|---|---|
+| 接口 | `api.trae.cn/trae/api/v2/pay/ide_user_ent_usage` | `ug-normal.trae.ai`（或账号 `api_host`）/trae/api/**v1**/pay/ide_user_ent_usage |
+| 额度字段 | `quota.credits_limit` | `quota.basic_usage_limit` |
+| 已用字段 | `usage.credits_amount` | `usage.basic_usage_amount` |
+| 计量单位 | 积分 | **美元** |
+| 免费档 | 有积分的几条，加总即余额 | `Free plan`：`basic_usage_limit=1` → **$1 免费额度** |
+
+实测国际 Free plan 的完整额度报文（`ug-normal.trae.ai`，2026-10-15）：
+
+```json
+{"is_dollar_usage_billing": true,
+ "user_entitlement_pack_list": [{
+   "display_desc": "Free plan",
+   "entitlement_base_info": {"quota": {"basic_usage_limit": 1, "credits_limit": 0,
+                                       "advanced_model_request_limit": 1000,
+                                       "premium_model_fast_request_limit": 10,
+                                       "premium_model_slow_request_limit": 50}},
+   "usage": {"basic_usage_amount": 0.00059, "credits_amount": 0}}]}
+```
+
+⇒ **免费档不是「无限免费」**：$1 额度，且另有请求数上限（高级模型 1000 次、
+高级模型快速档 10 次 / 慢速档 50 次）。面板按美元显示这一列：
+
+```
+额度列（国际号）  $0.99941 / $1        已用 $0.00059 · 剩 99.9%
+额度列（国内号）  5466 / 5900
+```
+
+两个口径**不可换算**，所以面板任何地方都不把它们相加：账号表分列、
+KPI 里「积分合计」只算积分号、国际额度单列一张卡、到期分布图只画积分（国际号单列计数并注明）。
+
+### 未证实：面板转发的调用会不会吃掉这 $1
+
+**没验证成功，如实记着。** 用面板打了 4 次国际模型调用（共约 2300 token）之后：
+
+- `basic_usage_amount` 仍是 `0.00059`，**没动**；
+- 上游逐会话用量接口 `POST /trae/api/v1/pay/query_user_usage_group_by_session`
+  （`usage_type:[5,6]`，近 7 天）**只返回 1 条** —— 是用户自己客户端 19:56 那次
+  （`DeepSeek-V4.1-Flash`、`mode:"Max"`、in 13370 / out 8、$0.00005），
+  **面板的调用一条都没登记**。
+
+可能的原因（都还没证）：免费档按**请求数**而不是美元扣；或该台账只记客户端直连的用量；
+或结算有较长延迟。**在弄清之前，不要把 $1 当成面板用量的硬约束**，
+也别假设面板能把国际号用光。要确认只能在更长时间尺度上再对一次（面板跑一整天后比金额）。
+
+顺带：那份逐会话台账带 `mode`/`use_max_mode` 字段，是 Max 模式被上游真实计量的独立佐证。
+
 
 **`gpt-6-sol` / `gpt-6-luna`（官方门控 + 旁路）**：这两个在模型表里带
 `display_contact_config.access.identity_list=[4,1,2,3]`，免费档（identity 0/5）不在内，直接发回
@@ -400,6 +594,9 @@ data/             （gitignored）state.json 池状态、usage.json 用量台账
 - `docs/` 不参与上传（gitignore + dockerignore）。
 - 验证类文档（`VERIFICATION.md` 等）不入库。
 - 日志/状态输出只显示 UID/Nickname/积分，不打印 token。
+- 抓包夹具（`internal/upstream/testdata/`）是上游**响应报文原文**：入库前把 uid / 订单号 /
+  设备号这类 12 位以上数字统一掩成 `1000…0`，计费与时间字段原样保留，
+  见 `ent_usage_unit_test.go`、`domains_test.go`、`max_variant_test.go`。
 
 ## 血统与致谢
 

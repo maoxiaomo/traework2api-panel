@@ -1,0 +1,710 @@
+{
+ "function_configs": [
+  {
+   "function": "solo_agent",
+   "config_info_list": [
+    {
+     "config_name": "search_agent_qwen_fast",
+     "config_source": 1,
+     "config_switch": true,
+     "context_window_tokens": {
+      "dev": 184000,
+      "max": 184000
+     },
+     "display_config": {
+      "can_use_super_model": false,
+      "commercial_info": {
+       "info": "",
+       "manual_usage": 0
+      },
+      "display_name": "",
+      "fee_model_level": 2,
+      "is_custom_model": false,
+      "is_new": false,
+      "max_mode": false,
+      "memory_display_config": {},
+      "model_capability": "reasoning_model",
+      "multimodal": false,
+      "tags": []
+     },
+     "display_contact_config": "{\"access\":{\"data\":{\"identity_list\":[0,5,1,2,3,100]}},\"consumption_rate\":{\"enable\":true,\"data\":{\"rate\":0.04}},\"reasoning\":{\"enable\":true}}",
+     "extra_config": "{\"apply_file_path\":true,\"enable_invalid_json_hint\":true,\"is_new_pe\":true,\"native_function_call\":true,\"open_optimize\":true,\"use_v2_process\":true}",
+     "is_default": false,
+     "is_invisible_to_user": true,
+     "model_detail_list": [
+      {
+       "max_tokens": 16000,
+       "max_turn": 20,
+       "model_entitlement_usage_cost": 1,
+       "model_extra_config": "{\"collect_raw_prompt_input\":false,\"enable_duplicated_tool_calls_reminder\":true,\"enable_remove_tools\":true,\"enable_todo_list\":false,\"force_enable_mcp\":false,\"function_call_parser_rule\":\"qwen_3_coder_fast_search\",\"remove_tool_names_for_search\":[\"WebSearch\",\"RunCommand\",\"CheckCommandStatus\",\"StopCommand\",\"GetDiagnostics\",\"ExitPlanMode\",\"OpenPreview\",\"Edit\",\"MultiEdit\",\"Write\",\"SearchCodebase\",\"TodoWrite\",\"Skill\"],\"remove_tool_names_if_plan_mode_for_search\":[\"WebSearch\",\"RunCommand\",\"CheckCommandStatus\",\"StopCommand\",\"GetDiagnostics\",\"ExitPlanMode\",\"OpenPreview\",\"Edit\",\"MultiEdit\",\"Write\",\"TodoWrite\",\"SearchCodebase\",\"Skill\"],\"replace_edit_tools_by_apply_patch\":true,\"run_command_output_char_count\":20000,\"stop_duplicated_tool_calls\":true,\"v2_hash_mention_file_linter_error_enabled\":false,\"v2_interaction_flow_enable_file_diff\":true,\"v2_max_mode_enabled\":true,\"v2_max_toolcall_chars\":30000,\"v2_search_codebase_max_tokens\":10000,\"v2_search_codebase_use_opt_logic\":true,\"v3_compaction_token_limit_ratio\":0.9,\"v3_custom_rules_max_chars\":60000,\"v3_disable_nfc_dummy_tool\":true,\"v3_enable_skill_tool\":true,\"v3_grep_max_result_chars\":20000,\"v3_ls_max_result_chars\":40000,\"v3_micro_compact_trigger_token_ratio\":0.85,\"v3_passive_compaction_user_perceptible\":true,\"v3_read_enable_truncation\":false,\"v3_read_max_content_byte_size\":65536,\"v3_solo_coder_compaction_restore_reading_nums\":0,\"v3_solo_coder_cumulative_compaction_strategy\":\"compact_with_separate_model\"}",
+       "model_name": "search_agent_model__dev",
+       "prompt_max_tokens": 168000,
+       "tool_call_history_max_tokens": 0
+      },
+      {
+       "max_tokens": 16000,
+       "max_turn": 20,
+       "model_entitlement_usage_cost": 1,
+       "model_extra_config": "{\"collect_raw_prompt_input\":false,\"enable_duplicated_tool_calls_reminder\":true,\"enable_remove_tools\":true,\"enable_todo_list\":false,\"force_enable_mcp\":false,\"function_call_parser_rule\":\"qwen_3_coder_fast_search\",\"remove_tool_names_for_search\":[\"WebSearch\",\"RunCommand\",\"CheckCommandStatus\",\"StopCommand\",\"GetDiagnostics\",\"ExitPlanMode\",\"OpenPreview\",\"Edit\",\"MultiEdit\",\"Write\",\"SearchCodebase\",\"TodoWrite\",\"Skill\"],\"remove_tool_names_if_plan_mode_for_search\":[\"WebSearch\",\"RunCommand\",\"CheckCommandStatus\",\"StopCommand\",\"GetDiagnostics\",\"ExitPlanMode\",\"OpenPreview\",\"Edit\",\"MultiEdit\",\"Write\",\"TodoWrite\",\"SearchCodebase\",\"Skill\"],\"replace_edit_tools_by_apply_patch\":true,\"run_command_output_char_count\":20000,\"stop_duplicated_tool_calls\":true,\"v2_hash_mention_file_linter_error_enabled\":false,\"v2_interaction_flow_enable_file_diff\":true,\"v2_max_mode_enabled\":true,\"v2_max_toolcall_chars\":30000,\"v2_search_codebase_max_tokens\":10000,\"v2_search_codebase_use_opt_logic\":true,\"v3_compaction_token_limit_ratio\":0.9,\"v3_custom_rules_max_chars\":60000,\"v3_disable_nfc_dummy_tool\":true,\"v3_enable_skill_tool\":true,\"v3_grep_max_result_chars\":20000,\"v3_ls_max_result_chars\":40000,\"v3_micro_compact_trigger_token_ratio\":0.85,\"v3_passive_compaction_user_perceptible\":true,\"v3_read_enable_truncation\":false,\"v3_read_max_content_byte_size\":65536,\"v3_solo_coder_compaction_restore_reading_nums\":0,\"v3_solo_coder_cumulative_compaction_strategy\":\"compact_with_separate_model\"}",
+       "model_name": "search_agent_model__max",
+       "prompt_max_tokens": 168000,
+       "tool_call_history_max_tokens": 0
+      }
+     ],
+     "reasoning_effort_config": {
+      "support_thinking": false
+     },
+     "usage": "chat_completion"
+    },
+    {
+     "config_name": "glm-5.2",
+     "config_source": 1,
+     "config_switch": true,
+     "context_window_tokens": {
+      "dev": 200000,
+      "max": 1000000
+     },
+     "display_config": {
+      "can_use_super_model": false,
+      "commercial_info": {
+       "info": "",
+       "manual_usage": 0
+      },
+      "display_name": "GLM-5.2",
+      "fee_model_level": 2,
+      "is_beta": false,
+      "is_custom_model": false,
+      "is_new": false,
+      "max_mode": true,
+      "memory_display_config": {},
+      "model_capability": "reasoning_model",
+      "multimodal": false,
+      "tags": []
+     },
+     "display_contact_config": "{\"access\":{\"data\":{\"identity_list\":[0,5,1,2,3,100]}},\"consumption_rate\":{\"enable\":true,\"data\":{\"rate\":0.78}},\"reasoning\":{\"enable\":true}}",
+     "extra_config": "{\"apply_file_path\":true,\"enable_invalid_json_hint\":true,\"is_new_pe\":true,\"native_function_call\":true,\"use_v2_process\":true}",
+     "is_default": false,
+     "is_invisible_to_user": false,
+     "model_detail_list": [
+      {
+       "icon": {
+        "dark": "https://lf-cdn.trae.com.cn/obj/trae-com-cn/model/glm-v3-dark.svg",
+        "light": "https://lf-cdn.trae.com.cn/obj/trae-com-cn/model/glm-v3-light.svg"
+       },
+       "max_tokens": 32000,
+       "max_turn": 500,
+       "model_entitlement_usage_cost": 1,
+       "model_extra_config": "{\"c_model_skill_listing_move_to_session_init\":true,\"compact_skill_name_list\":[\"TRAE-browseruse\",\"TRAE-browseruse-external\"],\"compaction_strategy_by_trigger\":{\"auto_sync\":\"compact_with_kv_cache\"},\"context_window_nudge_on_tool_result_threshold_ratio\":0.5,\"context_window_nudge_on_user_input_threshold_ratio\":0.5,\"disable_diagnostics_tool\":true,\"disable_history_adapter\":true,\"disable_openpreview_tool\":true,\"disable_tool_result_xml_tag\":true,\"dynamic_tool_loading_cn_defer_execute\":true,\"enable_agent_capability_merge\":true,\"enable_agent_message_queue\":true,\"enable_ai_sandbox_awareness\":true,\"enable_auto_plan_mode\":true,\"enable_browser_ptc_tools\":true,\"enable_browser_screenshot_auto_read\":true,\"enable_browser_tools\":false,\"enable_browser_use_agent\":true,\"enable_command_exit_code_semantics\":true,\"enable_compact_reasoning_effort_alignment\":true,\"enable_compact_skill_content\":true,\"enable_compaction_reminder\":true,\"enable_computer_use_agent\":true,\"enable_computer_use_ptc_tools\":true,\"enable_content_loop_detection\":true,\"enable_duplicated_tool_calls_reminder\":true,\"enable_force_compress_by_history_length\":true,\"enable_general_purpose_sub_agent\":true,\"enable_generate_image\":true,\"enable_generate_video\":true,\"enable_inject_chat_memory_variables\":true,\"enable_llm_error_model_degrade\":true,\"enable_model_switch_and_tool_loop_guardrails\":true,\"enable_new_context_tool\":true,\"enable_obtain_after_new_context\":true,\"enable_parallel_tool_call_limit_in_pe\":true,\"enable_plan_agent\":true,\"enable_read_tool_image_to_text\":true,\"enable_restate_chat_memory_when_render_summary\":true,\"enable_resume_subagent\":true,\"enable_retry_after_content_loop\":true,\"enable_retry_after_reasoning_loop\":true,\"enable_retry_on_empty_response\":true,\"enable_retry_on_empty_tool_calls\":true,\"enable_schedule_tool\":true,\"enable_shell_compatibility_reminder\":true,\"enable_task_output_tool\":true,\"enable_task_stop_tool\":true,\"enable_thought_duplicate_detection\":true,\"enable_web_search_allowed_domains\":true,\"enable_web_search_blocked_domains\":true,\"enhanced_command_ast_check_2605\":true,\"force_enable_mcp\":true,\"include_extra_info_tokens\":false,\"new_context_file_count_limit\":9,\"new_context_user_input_counts\":4,\"pe_parallel_tool_call_limit\":5,\"read_tool_image_to_text_config_name\":\"multimodal_image_kimi-k2.5\",\"remove_computer_use_mcp_server_info\":true,\"repeated_toolcall_interrupt_count\":8,\"repeated_toolcall_override_count\":5,\"replace_todo_write_with_task_tools\":false,\"run_command_output_char_count\":20000,\"save_toolcall_result_config\":{\"RunCommand\":{\"enable\":true,\"threshold\":30000},\"Shell\":{\"enable\":true,\"threshold\":30000},\"WebFetch\":{\"enable\":true,\"threshold\":10000},\"run_mcp\":{\"enable\":true,\"threshold\":10000}},\"spawn_tool_name\":\"Agent\",\"stop_duplicated_tool_calls\":true,\"sub_agent_concurrency\":{\"enabled\":true,\"limit\":5},\"sub_agent_tool_family\":\"test\",\"todo_write_allow_partial_input\":true,\"tool_output_alignment\":{\"edit_minimal_output\":true,\"read_offset_zero_based\":true,\"write_minimal_output\":true},\"v2_detect_edit_file_linter_error\":true,\"v2_edit_file_linter_error_sleep_time\":2,\"v2_max_mode_enabled\":true,\"v2_max_toolcall_chars\":30000,\"v2_read_old_linter_error_enabled\":true,\"v2_search_codebase_max_tokens\":10000,\"v2_search_codebase_use_opt_logic\":true,\"v3_agent_tools_map\":{\"Plan\":[\"Shell\",\"StopCommand\",\"Read\",\"Grep\",\"Glob\",\"Skill\",\"TodoWrite\",\"WebFetch\",\"WebSearch\"],\"search\":[\"Shell\",\"StopCommand\",\"Grep\",\"Glob\",\"Read\",\"Skill\",\"TodoWrite\",\"WebFetch\",\"WebSearch\"]},\"v3_cc_aligned_linter_diagnostics\":true,\"v3_compaction_token_limit_ratio\":0.9,\"v3_custom_rules_max_chars\":60000,\"v3_disable_ls_tool\":true,\"v3_disable_nfc_dummy_tool\":true,\"v3_disable_search_codebase_tool\":true,\"v3_enable_ask_user_question_tool\":true,\"v3_enable_cat_n_line_number_format\":true,\"v3_enable_file_diff_resolver_v2\":true,\"v3_enable_interrupt_reminder\":true,\"v3_enable_multi_edit_tool\":false,\"v3_enable_skill_tool\":true,\"v3_enable_web_fetch_tool\":true,\"v3_glob_enable_no_ignore\":true,\"v3_grep_enable_hidden\":true,\"v3_grep_max_columns\":500,\"v3_grep_max_result_chars\":20000,\"v3_grep_post_sort\":true,\"v3_ls_max_result_chars\":40000,\"v3_micro_compact_config\":{\"gap_new_session_keep_rounds\":1,\"supported_tools\":[\"SearchCodebase\",\"GetDiagnostics\",\"OpenPreview\",\"Read\",\"Grep\",\"Glob\",\"LS\",\"Edit\",\"Write\",\"SearchReplace\",\"apply_patch\",\"Shell\",\"RunCommand\",\"CheckCommandStatus\",\"exec_command\",\"write_stdin\",\"WebSearch\",\"WebFetch\"]},\"v3_read_dedup_enabled\":true,\"v3_read_enable_truncation\":false,\"v3_read_max_content_byte_size\":65536,\"v3_replace_edit_tools_by_edit_file_update\":false,\"v3_replace_run_command_by_shell_tool\":true,\"v3_solo_coder_compaction_restore_char_budget\":25000,\"v3_solo_coder_compaction_restore_item_char_budget\":10000,\"v3_solo_coder_compaction_restore_reading_nums\":5,\"v3_solo_coder_compaction_restore_skill_nums\":1,\"v3_solo_coder_cumulative_compaction_strategy\":\"compact_with_separate_model\",\"v3_stream_throttle_enabled\":true,\"v3_sub_agent_model_config_names\":{\"browser_use\":\"browser_use_subagent\",\"computer_use\":\"Doubao-Seed-2.1-Turbo\",\"search\":\"search_agent_qwen_fast-0710\"},\"v3_sub_agent_unique_name_map\":{\"general_purpose_task\":\"general-purpose\",\"search\":\"Explore\"},\"web_fetch_strategy\":\"auto\",\"web_search_skip_crawler_when_snippet_exists\":true}",
+       "model_name": "glm-5.2__dev",
+       "prompt_max_tokens": 168000,
+       "tool_call_history_max_tokens": 0
+      },
+      {
+       "icon": {
+        "dark": "https://lf-cdn.trae.com.cn/obj/trae-com-cn/model/glm-v3-dark.svg",
+        "light": "https://lf-cdn.trae.com.cn/obj/trae-com-cn/model/glm-v3-light.svg"
+       },
+       "max_tokens": 64000,
+       "max_turn": 500,
+       "model_entitlement_usage_cost": 1,
+       "model_extra_config": "{\"c_model_skill_listing_move_to_session_init\":true,\"compact_skill_name_list\":[\"TRAE-browseruse\",\"TRAE-browseruse-external\"],\"compaction_strategy_by_trigger\":{\"auto_sync\":\"compact_with_kv_cache\"},\"context_window_nudge_on_tool_result_threshold_ratio\":0.5,\"context_window_nudge_on_user_input_threshold_ratio\":0.5,\"disable_diagnostics_tool\":true,\"disable_history_adapter\":true,\"disable_openpreview_tool\":true,\"disable_tool_result_xml_tag\":true,\"dynamic_tool_loading_cn_defer_execute\":true,\"enable_agent_capability_merge\":true,\"enable_agent_message_queue\":true,\"enable_ai_sandbox_awareness\":true,\"enable_auto_plan_mode\":true,\"enable_browser_ptc_tools\":true,\"enable_browser_screenshot_auto_read\":true,\"enable_browser_tools\":false,\"enable_browser_use_agent\":true,\"enable_command_exit_code_semantics\":true,\"enable_compact_reasoning_effort_alignment\":true,\"enable_compact_skill_content\":true,\"enable_compaction_reminder\":true,\"enable_computer_use_agent\":true,\"enable_computer_use_ptc_tools\":true,\"enable_content_loop_detection\":true,\"enable_duplicated_tool_calls_reminder\":true,\"enable_force_compress_by_history_length\":true,\"enable_general_purpose_sub_agent\":true,\"enable_generate_image\":true,\"enable_generate_video\":true,\"enable_inject_chat_memory_variables\":true,\"enable_llm_error_model_degrade\":true,\"enable_model_switch_and_tool_loop_guardrails\":true,\"enable_new_context_tool\":true,\"enable_obtain_after_new_context\":true,\"enable_parallel_tool_call_limit_in_pe\":true,\"enable_plan_agent\":true,\"enable_read_tool_image_to_text\":true,\"enable_restate_chat_memory_when_render_summary\":true,\"enable_resume_subagent\":true,\"enable_retry_after_content_loop\":true,\"enable_retry_after_reasoning_loop\":true,\"enable_retry_on_empty_response\":true,\"enable_retry_on_empty_tool_calls\":true,\"enable_schedule_tool\":true,\"enable_shell_compatibility_reminder\":true,\"enable_task_output_tool\":true,\"enable_task_stop_tool\":true,\"enable_thought_duplicate_detection\":true,\"enable_web_search_allowed_domains\":true,\"enable_web_search_blocked_domains\":true,\"enhanced_command_ast_check_2605\":true,\"force_enable_mcp\":true,\"include_extra_info_tokens\":false,\"new_context_file_count_limit\":9,\"new_context_user_input_counts\":4,\"pe_parallel_tool_call_limit\":5,\"read_tool_image_to_text_config_name\":\"multimodal_image_kimi-k2.5\",\"remove_computer_use_mcp_server_info\":true,\"repeated_toolcall_interrupt_count\":8,\"repeated_toolcall_override_count\":5,\"replace_todo_write_with_task_tools\":false,\"run_command_output_char_count\":20000,\"save_toolcall_result_config\":{\"RunCommand\":{\"enable\":true,\"threshold\":30000},\"Shell\":{\"enable\":true,\"threshold\":30000},\"WebFetch\":{\"enable\":true,\"threshold\":10000},\"run_mcp\":{\"enable\":true,\"threshold\":10000}},\"spawn_tool_name\":\"Agent\",\"stop_duplicated_tool_calls\":true,\"sub_agent_concurrency\":{\"enabled\":true,\"limit\":5},\"sub_agent_tool_family\":\"test\",\"todo_write_allow_partial_input\":true,\"tool_output_alignment\":{\"edit_minimal_output\":true,\"read_offset_zero_based\":true,\"write_minimal_output\":true},\"v2_detect_edit_file_linter_error\":true,\"v2_edit_file_linter_error_sleep_time\":2,\"v2_max_mode_enabled\":true,\"v2_max_toolcall_chars\":30000,\"v2_read_old_linter_error_enabled\":true,\"v2_search_codebase_max_tokens\":10000,\"v2_search_codebase_use_opt_logic\":true,\"v3_agent_tools_map\":{\"Plan\":[\"Shell\",\"StopCommand\",\"Read\",\"Grep\",\"Glob\",\"Skill\",\"TodoWrite\",\"WebFetch\",\"WebSearch\"],\"search\":[\"Shell\",\"StopCommand\",\"Grep\",\"Glob\",\"Read\",\"Skill\",\"TodoWrite\",\"WebFetch\",\"WebSearch\"]},\"v3_cc_aligned_linter_diagnostics\":true,\"v3_compaction_token_limit_ratio\":0.9,\"v3_custom_rules_max_chars\":60000,\"v3_disable_ls_tool\":true,\"v3_disable_nfc_dummy_tool\":true,\"v3_disable_search_codebase_tool\":true,\"v3_enable_ask_user_question_tool\":true,\"v3_enable_cat_n_line_number_format\":true,\"v3_enable_file_diff_resolver_v2\":true,\"v3_enable_interrupt_reminder\":true,\"v3_enable_multi_edit_tool\":false,\"v3_enable_skill_tool\":true,\"v3_enable_web_fetch_tool\":true,\"v3_glob_enable_no_ignore\":true,\"v3_grep_enable_hidden\":true,\"v3_grep_max_columns\":500,\"v3_grep_max_result_chars\":20000,\"v3_grep_post_sort\":true,\"v3_ls_max_result_chars\":40000,\"v3_micro_compact_config\":{\"gap_new_session_keep_rounds\":1,\"supported_tools\":[\"SearchCodebase\",\"GetDiagnostics\",\"OpenPreview\",\"Read\",\"Grep\",\"Glob\",\"LS\",\"Edit\",\"Write\",\"SearchReplace\",\"apply_patch\",\"Shell\",\"RunCommand\",\"CheckCommandStatus\",\"exec_command\",\"write_stdin\",\"WebSearch\",\"WebFetch\"]},\"v3_read_dedup_enabled\":true,\"v3_read_enable_truncation\":false,\"v3_read_max_content_byte_size\":131072,\"v3_replace_edit_tools_by_edit_file_update\":false,\"v3_replace_run_command_by_shell_tool\":true,\"v3_solo_coder_compaction_restore_char_budget\":25000,\"v3_solo_coder_compaction_restore_item_char_budget\":10000,\"v3_solo_coder_compaction_restore_reading_nums\":5,\"v3_solo_coder_compaction_restore_skill_nums\":1,\"v3_solo_coder_cumulative_compaction_strategy\":\"compact_with_separate_model\",\"v3_stream_throttle_enabled\":true,\"v3_sub_agent_model_config_names\":{\"browser_use\":\"browser_use_subagent\",\"computer_use\":\"Doubao-Seed-2.1-Turbo\",\"search\":\"search_agent_qwen_fast-0710\"},\"v3_sub_agent_unique_name_map\":{\"general_purpose_task\":\"general-purpose\",\"search\":\"Explore\"},\"web_fetch_strategy\":\"auto\",\"web_search_skip_crawler_when_snippet_exists\":true}",
+       "model_name": "glm-5.2__max",
+       "prompt_max_tokens": 936000,
+       "tool_call_history_max_tokens": 0
+      }
+     ],
+     "reasoning_effort_config": {
+      "default_level": "high",
+      "options": [
+       "high",
+       "extra_high"
+      ],
+      "support_thinking": true
+     },
+     "usage": "chat_completion"
+    },
+    {
+     "config_name": "glm-5.2_advisor_doubao",
+     "config_source": 1,
+     "config_switch": true,
+     "context_window_tokens": {
+      "dev": 200000
+     },
+     "display_config": {
+      "can_use_super_model": false,
+      "commercial_info": {
+       "info": "",
+       "manual_usage": 0
+      },
+      "display_name": "GLM-5.2",
+      "fee_model_level": 2,
+      "is_beta": false,
+      "is_custom_model": false,
+      "is_new": false,
+      "max_mode": false,
+      "memory_display_config": {},
+      "model_capability": "reasoning_model",
+      "multimodal": false,
+      "tags": []
+     },
+     "display_contact_config": "{\"access\":{\"data\":{\"identity_list\":[0,5,1,2,3,100]}},\"consumption_rate\":{\"enable\":true,\"data\":{\"rate\":0.78}},\"reasoning\":{\"enable\":true}}",
+     "extra_config": "{\"apply_file_path\":true,\"enable_invalid_json_hint\":true,\"is_new_pe\":true,\"native_function_call\":true,\"use_v2_process\":true}",
+     "is_default": false,
+     "is_invisible_to_user": true,
+     "model_detail_list": [
+      {
+       "max_tokens": 32000,
+       "max_turn": 500,
+       "model_entitlement_usage_cost": 1,
+       "model_extra_config": "{\"disable_history_adapter\":true,\"enable_ai_sandbox_awareness\":true,\"enable_command_exit_code_semantics\":true,\"enable_computer_use_ptc_tools\":true,\"enable_content_loop_detection\":true,\"enable_duplicated_tool_calls_reminder\":true,\"enable_force_compress_by_history_length\":true,\"enable_inject_chat_memory_variables\":true,\"enable_llm_error_model_degrade\":true,\"enable_model_switch_and_tool_loop_guardrails\":true,\"enable_parallel_tool_call_limit_in_pe\":true,\"enable_restate_chat_memory_when_render_summary\":true,\"enable_resume_subagent\":true,\"enable_retry_after_content_loop\":true,\"enable_retry_after_reasoning_loop\":true,\"enable_retry_on_empty_response\":true,\"enable_retry_on_empty_tool_calls\":true,\"enable_shell_compatibility_reminder\":true,\"enable_thought_duplicate_detection\":true,\"enhanced_command_ast_check_2605\":true,\"force_enable_mcp\":true,\"include_extra_info_tokens\":false,\"pe_parallel_tool_call_limit\":5,\"remove_computer_use_mcp_server_info\":true,\"repeated_toolcall_interrupt_count\":8,\"repeated_toolcall_override_count\":5,\"run_command_output_char_count\":20000,\"save_toolcall_result_config\":{\"RunCommand\":{\"enable\":true,\"threshold\":30000},\"Shell\":{\"enable\":true,\"threshold\":30000},\"WebFetch\":{\"enable\":true,\"threshold\":10000},\"run_mcp\":{\"enable\":true,\"threshold\":10000}},\"stop_duplicated_tool_calls\":true,\"sub_agent_concurrency\":{\"enabled\":true,\"limit\":5},\"todo_write_allow_partial_input\":true,\"v2_detect_edit_file_linter_error\":true,\"v2_edit_file_linter_error_sleep_time\":2,\"v2_max_mode_enabled\":true,\"v2_max_toolcall_chars\":30000,\"v2_read_old_linter_error_enabled\":true,\"v2_search_codebase_max_tokens\":10000,\"v2_search_codebase_use_opt_logic\":true,\"v3_compaction_token_limit_ratio\":0.9,\"v3_custom_rules_max_chars\":60000,\"v3_disable_nfc_dummy_tool\":true,\"v3_enable_ask_user_question_tool\":true,\"v3_enable_file_diff_resolver_v2\":true,\"v3_enable_multi_edit_tool\":false,\"v3_enable_skill_tool\":true,\"v3_enable_web_fetch_tool\":true,\"v3_glob_enable_no_ignore\":true,\"v3_grep_enable_hidden\":true,\"v3_grep_max_columns\":500,\"v3_grep_max_result_chars\":20000,\"v3_grep_post_sort\":true,\"v3_ls_max_result_chars\":40000,\"v3_micro_compact_config\":{\"gap_new_session_keep_rounds\":1,\"supported_tools\":[\"SearchCodebase\",\"GetDiagnostics\",\"OpenPreview\",\"Read\",\"Grep\",\"Glob\",\"LS\",\"Edit\",\"Write\",\"SearchReplace\",\"apply_patch\",\"Shell\",\"RunCommand\",\"CheckCommandStatus\",\"exec_command\",\"write_stdin\",\"WebSearch\",\"WebFetch\"]},\"v3_read_dedup_enabled\":true,\"v3_read_enable_truncation\":false,\"v3_read_max_content_byte_size\":65536,\"v3_replace_edit_tools_by_edit_file_update\":false,\"v3_solo_coder_compaction_restore_char_budget\":10000,\"v3_solo_coder_compaction_restore_item_char_budget\":4000,\"v3_solo_coder_compaction_restore_reading_nums\":5,\"v3_solo_coder_compaction_restore_skill_nums\":3,\"v3_solo_coder_cumulative_compaction_strategy\":\"compact_with_separate_model\",\"v3_stream_throttle_enabled\":true,\"v3_sub_agent_model_config_names\":{\"search\":\"search_agent_qwen_fast-0710\"}}",
+       "model_name": "glm-5.2__dev",
+       "prompt_max_tokens": 168000,
+       "tool_call_history_max_tokens": 0
+      }
+     ],
+     "usage": "chat_completion"
+    },
+    {
+     "config_name": "deepseek-v4.1-flash",
+     "config_source": 1,
+     "config_switch": true,
+     "context_window_tokens": {
+      "dev": 200000,
+      "max": 1000000
+     },
+     "display_config": {
+      "can_use_super_model": false,
+      "commercial_info": {
+       "info": "",
+       "manual_usage": 0
+      },
+      "display_name": "DeepSeek-V4.1-Flash",
+      "fee_model_level": 2,
+      "is_beta": false,
+      "is_custom_model": false,
+      "is_new": false,
+      "max_mode": true,
+      "memory_display_config": {},
+      "model_capability": "reasoning_model",
+      "multimodal": true,
+      "tags": [],
+      "tool_response_multimodal": false
+     },
+     "display_contact_config": "{\"access\":{\"data\":{\"identity_list\":[0,5,1,2,3,100]}},\"activity_discount\":{\"enable\":true,\"subKey\":\"off_peak_member_discount_18_9\",\"data\":{\"current\":{\"discount_type\":\"off_peak\",\"before_consumption_rate\":0.12,\"consumption_rate\":0.06,\"discount\":50},\"member\":{\"before_consumption_rate\":0.12,\"after_consumption_rate\":0.06,\"discount\":50},\"off_peak\":{\"before_consumption_rate\":0.12,\"after_consumption_rate\":0.06,\"discount\":50,\"time_windows\":[{\"weekdays\":[1,2,3,4,5],\"start_minute\":0,\"end_minute\":540},{\"weekdays\":[1,2,3,4,5],\"start_minute\":720,\"end_minute\":840},{\"weekdays\":[1,2,3,4,5],\"start_minute\":1080,\"end_minute\":1440},{\"weekdays\":[6,7],\"start_minute\":0,\"end_minute\":1440}],\"time_zone\":\"Asia/Shanghai\"}}},\"consumption_rate\":{\"enable\":true,\"data\":{\"rate\":0.06}},\"multimodal\":{\"enable\":true},\"reasoning\":{\"enable\":true}}",
+     "extra_config": "{\"apply_file_path\":true,\"enable_invalid_json_hint\":true,\"is_new_pe\":true,\"native_function_call\":true,\"use_v2_process\":true}",
+     "is_default": false,
+     "is_invisible_to_user": false,
+     "model_detail_list": [
+      {
+       "icon": {
+        "dark": "https://lf-cdn.trae.com.cn/obj/trae-com-cn/model/deepseek-dark.svg",
+        "light": "https://lf-cdn.trae.com.cn/obj/trae-com-cn/model/deepseek.svg"
+       },
+       "max_tokens": 32000,
+       "max_turn": 500,
+       "model_entitlement_usage_cost": 1,
+       "model_extra_config": "{\"advisor_tool\":{\"advisor_config_name\":\"glm-5.3_advisor\",\"advisor_model\":\"glm-5.3__dev\",\"enabled\":true,\"max_uses_per_request\":3,\"pass_tools_to_advisor\":false,\"rate_limit_qpm\":600,\"trim_system_prompt\":true,\"trim_tool_results\":true},\"c_model_skill_listing_move_to_session_init\":true,\"compact_skill_name_list\":[\"TRAE-browseruse\",\"TRAE-browseruse-external\"],\"compaction_strategy_by_trigger\":{\"auto_sync\":\"compact_with_kv_cache\"},\"context_window_nudge_on_tool_result_threshold_ratio\":0.5,\"context_window_nudge_on_user_input_threshold_ratio\":0.5,\"disable_diagnostics_tool\":true,\"disable_history_adapter\":true,\"disable_openpreview_tool\":true,\"disable_tool_result_xml_tag\":true,\"dynamic_tool_loading_cn_defer_execute\":true,\"enable_agent_capability_merge\":true,\"enable_agent_message_queue\":true,\"enable_ai_sandbox_awareness\":true,\"enable_auto_plan_mode\":true,\"enable_browser_ptc_tools\":true,\"enable_browser_screenshot_auto_read\":true,\"enable_browser_tools\":false,\"enable_browser_use_agent\":true,\"enable_command_exit_code_semantics\":true,\"enable_compact_reasoning_effort_alignment\":true,\"enable_compact_skill_content\":true,\"enable_compaction_reminder\":true,\"enable_computer_use_agent\":true,\"enable_computer_use_ptc_tools\":true,\"enable_content_loop_detection\":true,\"enable_duplicated_tool_calls_reminder\":true,\"enable_force_compress_by_history_length\":true,\"enable_general_purpose_sub_agent\":true,\"enable_generate_image\":true,\"enable_generate_video\":true,\"enable_inject_chat_memory_variables\":true,\"enable_llm_error_model_degrade\":true,\"enable_model_switch_and_tool_loop_guardrails\":true,\"enable_new_context_tool\":true,\"enable_obtain_after_new_context\":true,\"enable_parallel_tool_call_limit_in_pe\":false,\"enable_plan_agent\":true,\"enable_read_tool_image_to_text\":true,\"enable_restate_chat_memory_when_render_summary\":true,\"enable_resume_subagent\":true,\"enable_retry_after_content_loop\":true,\"enable_retry_after_reasoning_loop\":true,\"enable_schedule_tool\":true,\"enable_shell_compatibility_reminder\":true,\"enable_task_output_tool\":true,\"enable_task_stop_tool\":true,\"enable_thought_duplicate_detection\":true,\"enable_web_search_allowed_domains\":true,\"enable_web_search_blocked_domains\":true,\"enhanced_command_ast_check_2605\":true,\"force_enable_mcp\":true,\"include_extra_info_tokens\":false,\"new_context_file_count_limit\":9,\"new_context_user_input_counts\":4,\"pass_all_extra_info\":true,\"read_tool_image_to_text_config_name\":\"multimodal_image_kimi-k2.5\",\"remove_computer_use_mcp_server_info\":true,\"repeated_toolcall_interrupt_count\":8,\"repeated_toolcall_override_count\":5,\"replace_todo_write_with_task_tools\":false,\"run_command_output_char_count\":20000,\"save_toolcall_result_config\":{\"RunCommand\":{\"enable\":true,\"threshold\":30000},\"Shell\":{\"enable\":true,\"threshold\":30000},\"WebFetch\":{\"enable\":true,\"threshold\":10000},\"run_mcp\":{\"enable\":true,\"threshold\":10000}},\"spawn_tool_name\":\"Agent\",\"stop_duplicated_tool_calls\":true,\"sub_agent_concurrency\":{\"enabled\":true,\"limit\":5},\"sub_agent_tool_family\":\"test\",\"todo_write_allow_partial_input\":true,\"tool_output_alignment\":{\"edit_minimal_output\":true,\"read_offset_zero_based\":true,\"write_minimal_output\":true},\"v2_detect_edit_file_linter_error\":true,\"v2_edit_file_linter_error_sleep_time\":2,\"v2_max_mode_enabled\":true,\"v2_max_toolcall_chars\":30000,\"v2_read_old_linter_error_enabled\":true,\"v2_search_codebase_max_tokens\":10000,\"v2_search_codebase_use_opt_logic\":true,\"v3_agent_tools_map\":{\"Plan\":[\"Shell\",\"StopCommand\",\"Read\",\"Grep\",\"Glob\",\"Skill\",\"TodoWrite\",\"WebFetch\",\"WebSearch\"],\"search\":[\"Shell\",\"StopCommand\",\"Read\",\"Grep\",\"Glob\",\"Skill\",\"TodoWrite\",\"WebFetch\",\"WebSearch\"]},\"v3_cc_aligned_linter_diagnostics\":true,\"v3_compaction_token_limit_ratio\":0.9,\"v3_custom_rules_max_chars\":60000,\"v3_disable_ls_tool\":true,\"v3_disable_nfc_dummy_tool\":true,\"v3_disable_search_codebase_tool\":true,\"v3_enable_ask_user_question_tool\":true,\"v3_enable_cat_n_line_number_format\":true,\"v3_enable_file_diff_resolver_v2\":true,\"v3_enable_interrupt_reminder\":true,\"v3_enable_multi_edit_tool\":false,\"v3_enable_skill_tool\":true,\"v3_enable_web_fetch_tool\":true,\"v3_glob_enable_no_ignore\":true,\"v3_grep_enable_hidden\":true,\"v3_grep_max_columns\":500,\"v3_grep_max_result_chars\":20000,\"v3_grep_post_sort\":true,\"v3_ls_max_result_chars\":40000,\"v3_micro_compact_config\":{\"gap_new_session_keep_rounds\":1,\"supported_tools\":[\"SearchCodebase\",\"GetDiagnostics\",\"OpenPreview\",\"Read\",\"Grep\",\"Glob\",\"LS\",\"Edit\",\"Write\",\"SearchReplace\",\"apply_patch\",\"Shell\",\"RunCommand\",\"CheckCommandStatus\",\"exec_command\",\"write_stdin\",\"WebSearch\",\"WebFetch\"]},\"v3_read_dedup_enabled\":true,\"v3_read_enable_truncation\":false,\"v3_read_max_content_byte_size\":65536,\"v3_replace_edit_tools_by_edit_file_update\":false,\"v3_replace_run_command_by_shell_tool\":true,\"v3_solo_coder_compaction_restore_char_budget\":25000,\"v3_solo_coder_compaction_restore_item_char_budget\":10000,\"v3_solo_coder_compaction_restore_reading_nums\":5,\"v3_solo_coder_compaction_restore_skill_nums\":1,\"v3_solo_coder_cumulative_compaction_strategy\":\"compact_with_separate_model\",\"v3_stream_throttle_enabled\":true,\"v3_sub_agent_model_config_names\":{\"browser_use\":\"browser_use_subagent\",\"computer_use\":\"Doubao-Seed-2.1-Turbo\",\"search\":\"search_agent_qwen_fast-0710\"},\"v3_sub_agent_unique_name_map\":{\"general_purpose_task\":\"general-purpose\",\"search\":\"Explore\"},\"web_fetch_strategy\":\"auto\",\"web_search_skip_crawler_when_snippet_exists\":true}",
+       "model_name": "deepseek-v4.1-flash__dev",
+       "prompt_max_tokens": 168000,
+       "tool_call_history_max_tokens": 0
+      },
+      {
+       "icon": {
+        "dark": "https://lf-cdn.trae.com.cn/obj/trae-com-cn/model/deepseek-dark.svg",
+        "light": "https://lf-cdn.trae.com.cn/obj/trae-com-cn/model/deepseek.svg"
+       },
+       "max_tokens": 64000,
+       "max_turn": 500,
+       "model_entitlement_usage_cost": 1,
+       "model_extra_config": "{\"advisor_tool\":{\"advisor_config_name\":\"glm-5.3_advisor\",\"advisor_model\":\"glm-5.3__dev\",\"enabled\":true,\"max_uses_per_request\":3,\"pass_tools_to_advisor\":false,\"rate_limit_qpm\":600,\"trim_system_prompt\":true,\"trim_tool_results\":true},\"c_model_skill_listing_move_to_session_init\":true,\"compact_skill_name_list\":[\"TRAE-browseruse\",\"TRAE-browseruse-external\"],\"compaction_strategy_by_trigger\":{\"auto_sync\":\"compact_with_kv_cache\"},\"context_window_nudge_on_tool_result_threshold_ratio\":0.5,\"context_window_nudge_on_user_input_threshold_ratio\":0.5,\"disable_diagnostics_tool\":true,\"disable_history_adapter\":true,\"disable_openpreview_tool\":true,\"disable_tool_result_xml_tag\":true,\"dynamic_tool_loading_cn_defer_execute\":true,\"enable_agent_capability_merge\":true,\"enable_agent_message_queue\":true,\"enable_ai_sandbox_awareness\":true,\"enable_auto_plan_mode\":true,\"enable_browser_ptc_tools\":true,\"enable_browser_screenshot_auto_read\":true,\"enable_browser_tools\":false,\"enable_browser_use_agent\":true,\"enable_command_exit_code_semantics\":true,\"enable_compact_reasoning_effort_alignment\":true,\"enable_compact_skill_content\":true,\"enable_compaction_reminder\":true,\"enable_computer_use_agent\":true,\"enable_computer_use_ptc_tools\":true,\"enable_content_loop_detection\":true,\"enable_duplicated_tool_calls_reminder\":true,\"enable_force_compress_by_history_length\":true,\"enable_general_purpose_sub_agent\":true,\"enable_generate_image\":true,\"enable_generate_video\":true,\"enable_inject_chat_memory_variables\":true,\"enable_llm_error_model_degrade\":true,\"enable_model_switch_and_tool_loop_guardrails\":true,\"enable_new_context_tool\":true,\"enable_obtain_after_new_context\":true,\"enable_parallel_tool_call_limit_in_pe\":false,\"enable_plan_agent\":true,\"enable_read_tool_image_to_text\":true,\"enable_restate_chat_memory_when_render_summary\":true,\"enable_resume_subagent\":true,\"enable_retry_after_content_loop\":true,\"enable_retry_after_reasoning_loop\":true,\"enable_schedule_tool\":true,\"enable_shell_compatibility_reminder\":true,\"enable_task_output_tool\":true,\"enable_task_stop_tool\":true,\"enable_thought_duplicate_detection\":true,\"enable_web_search_allowed_domains\":true,\"enable_web_search_blocked_domains\":true,\"enhanced_command_ast_check_2605\":true,\"force_enable_mcp\":true,\"include_extra_info_tokens\":false,\"new_context_file_count_limit\":9,\"new_context_user_input_counts\":4,\"pass_all_extra_info\":true,\"read_tool_image_to_text_config_name\":\"multimodal_image_kimi-k2.5\",\"remove_computer_use_mcp_server_info\":true,\"repeated_toolcall_interrupt_count\":8,\"repeated_toolcall_override_count\":5,\"replace_todo_write_with_task_tools\":false,\"run_command_output_char_count\":20000,\"save_toolcall_result_config\":{\"RunCommand\":{\"enable\":true,\"threshold\":30000},\"Shell\":{\"enable\":true,\"threshold\":30000},\"WebFetch\":{\"enable\":true,\"threshold\":10000},\"run_mcp\":{\"enable\":true,\"threshold\":10000}},\"spawn_tool_name\":\"Agent\",\"stop_duplicated_tool_calls\":true,\"sub_agent_concurrency\":{\"enabled\":true,\"limit\":5},\"sub_agent_tool_family\":\"test\",\"todo_write_allow_partial_input\":true,\"tool_output_alignment\":{\"edit_minimal_output\":true,\"read_offset_zero_based\":true,\"write_minimal_output\":true},\"v2_detect_edit_file_linter_error\":true,\"v2_edit_file_linter_error_sleep_time\":2,\"v2_max_mode_enabled\":true,\"v2_max_toolcall_chars\":30000,\"v2_read_old_linter_error_enabled\":true,\"v2_search_codebase_max_tokens\":10000,\"v2_search_codebase_use_opt_logic\":true,\"v3_agent_tools_map\":{\"Plan\":[\"Shell\",\"StopCommand\",\"Read\",\"Grep\",\"Glob\",\"Skill\",\"TodoWrite\",\"WebFetch\",\"WebSearch\"],\"search\":[\"Shell\",\"StopCommand\",\"Read\",\"Grep\",\"Glob\",\"Skill\",\"TodoWrite\",\"WebFetch\",\"WebSearch\"]},\"v3_cc_aligned_linter_diagnostics\":true,\"v3_compaction_token_limit_ratio\":0.9,\"v3_custom_rules_max_chars\":60000,\"v3_disable_ls_tool\":true,\"v3_disable_nfc_dummy_tool\":true,\"v3_disable_search_codebase_tool\":true,\"v3_enable_ask_user_question_tool\":true,\"v3_enable_cat_n_line_number_format\":true,\"v3_enable_file_diff_resolver_v2\":true,\"v3_enable_interrupt_reminder\":true,\"v3_enable_multi_edit_tool\":false,\"v3_enable_skill_tool\":true,\"v3_enable_web_fetch_tool\":true,\"v3_glob_enable_no_ignore\":true,\"v3_grep_enable_hidden\":true,\"v3_grep_max_columns\":500,\"v3_grep_max_result_chars\":20000,\"v3_grep_post_sort\":true,\"v3_ls_max_result_chars\":40000,\"v3_micro_compact_config\":{\"gap_new_session_keep_rounds\":1,\"supported_tools\":[\"SearchCodebase\",\"GetDiagnostics\",\"OpenPreview\",\"Read\",\"Grep\",\"Glob\",\"LS\",\"Edit\",\"Write\",\"SearchReplace\",\"apply_patch\",\"Shell\",\"RunCommand\",\"CheckCommandStatus\",\"exec_command\",\"write_stdin\",\"WebSearch\",\"WebFetch\"]},\"v3_read_dedup_enabled\":true,\"v3_read_enable_truncation\":false,\"v3_read_max_content_byte_size\":131072,\"v3_replace_edit_tools_by_edit_file_update\":false,\"v3_replace_run_command_by_shell_tool\":true,\"v3_solo_coder_compaction_restore_char_budget\":25000,\"v3_solo_coder_compaction_restore_item_char_budget\":10000,\"v3_solo_coder_compaction_restore_reading_nums\":5,\"v3_solo_coder_compaction_restore_skill_nums\":1,\"v3_solo_coder_cumulative_compaction_strategy\":\"compact_with_separate_model\",\"v3_stream_throttle_enabled\":true,\"v3_sub_agent_model_config_names\":{\"browser_use\":\"browser_use_subagent\",\"computer_use\":\"Doubao-Seed-2.1-Turbo\",\"search\":\"search_agent_qwen_fast-0710\"},\"v3_sub_agent_unique_name_map\":{\"general_purpose_task\":\"general-purpose\",\"search\":\"Explore\"},\"web_fetch_strategy\":\"auto\",\"web_search_skip_crawler_when_snippet_exists\":true}",
+       "model_name": "deepseek-v4.1-flash__max",
+       "prompt_max_tokens": 936000,
+       "tool_call_history_max_tokens": 0
+      }
+     ],
+     "reasoning_effort_config": {
+      "default_level": "high",
+      "options": [
+       "light",
+       "high",
+       "extra_high"
+      ],
+      "support_thinking": true
+     },
+     "usage": "chat_completion"
+    },
+    {
+     "config_name": "kimi-k3",
+     "config_source": 1,
+     "config_switch": true,
+     "context_window_tokens": {
+      "dev": 200000,
+      "max": 1000000
+     },
+     "display_config": {
+      "can_use_super_model": false,
+      "commercial_info": {
+       "info": "",
+       "manual_usage": 0
+      },
+      "display_name": "Kimi-K3",
+      "fee_model_level": 2,
+      "is_beta": false,
+      "is_custom_model": false,
+      "is_new": false,
+      "max_mode": true,
+      "memory_display_config": {},
+      "model_capability": "chat_model",
+      "multimodal": true,
+      "tags": [],
+      "tool_response_multimodal": true,
+      "video_multimodal": true
+     },
+     "display_contact_config": "{\"access\":{\"data\":{\"identity_list\":[0,5,1,2,3,100]}},\"consumption_rate\":{\"enable\":true,\"data\":{\"rate\":1.83}},\"multimodal\":{\"enable\":true},\"reasoning\":{\"enable\":true},\"video_multimodal\":{\"enable\":true}}",
+     "extra_config": "{\"apply_file_path\":true,\"enable_invalid_json_hint\":true,\"is_new_pe\":true,\"native_function_call\":true,\"use_v2_process\":true}",
+     "is_default": false,
+     "is_invisible_to_user": false,
+     "model_detail_list": [
+      {
+       "icon": {
+        "dark": "https://lf-cdn.trae.com.cn/obj/trae-com-cn/model/kimi-v2-dark.svg",
+        "light": "https://lf-cdn.trae.com.cn/obj/trae-com-cn/model/kimi-v2-light.svg"
+       },
+       "max_tokens": 32000,
+       "max_turn": 500,
+       "model_entitlement_usage_cost": 1,
+       "model_extra_config": "{\"Thinking\":{\"Type\":\"enabled\"},\"browser_has_blocking_tools\":false,\"c_model_skill_listing_move_to_session_init\":true,\"compact_skill_name_list\":[\"TRAE-browseruse\",\"TRAE-browseruse-external\"],\"compaction_strategy_by_trigger\":{\"auto_sync\":\"compact_with_kv_cache\"},\"context_window_nudge_on_tool_result_threshold_ratio\":0.5,\"context_window_nudge_on_user_input_threshold_ratio\":0.5,\"disable_diagnostics_tool\":true,\"disable_history_adapter\":true,\"disable_openpreview_tool\":true,\"disable_tool_result_xml_tag\":true,\"dynamic_tool_loading_cn_defer_execute\":true,\"enable_agent_capability_merge\":true,\"enable_agent_message_queue\":true,\"enable_ai_sandbox_awareness\":true,\"enable_auto_plan_mode\":true,\"enable_browser_ptc_tools\":true,\"enable_browser_screenshot_auto_read\":true,\"enable_browser_tools\":false,\"enable_browser_use_agent\":true,\"enable_command_exit_code_semantics\":true,\"enable_compact_reasoning_effort_alignment\":true,\"enable_compact_skill_content\":true,\"enable_compaction_reminder\":true,\"enable_computer_use_ptc_tools\":true,\"enable_content_loop_detection\":true,\"enable_duplicated_tool_calls_reminder\":true,\"enable_force_compress_by_history_length\":true,\"enable_general_purpose_sub_agent\":true,\"enable_generate_image\":true,\"enable_generate_video\":true,\"enable_inject_chat_memory_variables\":true,\"enable_llm_error_model_degrade\":true,\"enable_model_switch_and_tool_loop_guardrails\":true,\"enable_new_context_tool\":true,\"enable_obtain_after_new_context\":true,\"enable_parallel_tool_call_limit_in_pe\":false,\"enable_plan_agent\":true,\"enable_read_tool_image_to_text\":true,\"enable_read_tool_video_to_text\":true,\"enable_restate_chat_memory_when_render_summary\":true,\"enable_resume_subagent\":true,\"enable_retry_after_content_loop\":true,\"enable_retry_after_reasoning_loop\":true,\"enable_schedule_tool\":true,\"enable_shell_compatibility_reminder\":true,\"enable_task_output_tool\":true,\"enable_task_stop_tool\":true,\"enable_thought_duplicate_detection\":true,\"enable_web_search_allowed_domains\":true,\"enable_web_search_blocked_domains\":true,\"enhanced_command_ast_check_2605\":true,\"force_enable_mcp\":true,\"include_extra_info_tokens\":false,\"new_context_file_count_limit\":9,\"new_context_user_input_counts\":4,\"pass_all_extra_info\":true,\"read_tool_image_to_text_config_name\":\"multimodal_image_kimi-k2.5\",\"read_tool_video_to_text_config_name\":\"kimi-k2.7-code\",\"remove_computer_use_mcp_server_info\":true,\"repeated_toolcall_interrupt_count\":8,\"repeated_toolcall_override_count\":5,\"replace_todo_write_with_task_tools\":false,\"run_command_output_char_count\":20000,\"save_toolcall_result_config\":{\"RunCommand\":{\"enable\":true,\"threshold\":30000},\"Shell\":{\"enable\":true,\"threshold\":30000},\"WebFetch\":{\"enable\":true,\"threshold\":10000},\"run_mcp\":{\"enable\":true,\"threshold\":10000}},\"spawn_tool_name\":\"Agent\",\"stop_duplicated_tool_calls\":true,\"sub_agent_concurrency\":{\"enabled\":true,\"limit\":5},\"sub_agent_tool_family\":\"test\",\"todo_write_allow_partial_input\":true,\"tool_output_alignment\":{\"edit_minimal_output\":true,\"read_offset_zero_based\":true,\"write_minimal_output\":true},\"v2_detect_edit_file_linter_error\":true,\"v2_edit_file_linter_error_sleep_time\":2,\"v2_max_mode_enabled\":true,\"v2_max_toolcall_chars\":30000,\"v2_read_old_linter_error_enabled\":true,\"v2_search_codebase_max_tokens\":10000,\"v2_search_codebase_use_opt_logic\":true,\"v3_agent_tools_map\":{\"Plan\":[\"Shell\",\"StopCommand\",\"Read\",\"Grep\",\"Glob\",\"Skill\",\"TodoWrite\",\"WebFetch\",\"WebSearch\"],\"search\":[\"Shell\",\"StopCommand\",\"Read\",\"Grep\",\"Glob\",\"Skill\",\"TodoWrite\",\"WebFetch\",\"WebSearch\"]},\"v3_cc_aligned_linter_diagnostics\":true,\"v3_compaction_token_limit_ratio\":0.9,\"v3_custom_rules_max_chars\":60000,\"v3_disable_ls_tool\":true,\"v3_disable_nfc_dummy_tool\":true,\"v3_disable_search_codebase_tool\":true,\"v3_enable_ask_user_question_tool\":true,\"v3_enable_cat_n_line_number_format\":true,\"v3_enable_file_diff_resolver_v2\":true,\"v3_enable_interrupt_reminder\":true,\"v3_enable_multi_edit_tool\":false,\"v3_enable_skill_tool\":true,\"v3_enable_web_fetch_tool\":true,\"v3_glob_enable_no_ignore\":true,\"v3_grep_enable_hidden\":true,\"v3_grep_max_columns\":500,\"v3_grep_max_result_chars\":20000,\"v3_grep_post_sort\":true,\"v3_ls_max_result_chars\":40000,\"v3_micro_compact_config\":{\"gap_new_session_keep_rounds\":1,\"supported_tools\":[\"SearchCodebase\",\"GetDiagnostics\",\"OpenPreview\",\"Read\",\"Grep\",\"Glob\",\"LS\",\"Edit\",\"Write\",\"SearchReplace\",\"apply_patch\",\"Shell\",\"RunCommand\",\"CheckCommandStatus\",\"exec_command\",\"write_stdin\",\"WebSearch\",\"WebFetch\"]},\"v3_read_dedup_enabled\":true,\"v3_read_enable_truncation\":false,\"v3_read_max_content_byte_size\":65536,\"v3_replace_edit_tools_by_edit_file_update\":false,\"v3_replace_run_command_by_shell_tool\":true,\"v3_solo_coder_compaction_restore_char_budget\":25000,\"v3_solo_coder_compaction_restore_item_char_budget\":10000,\"v3_solo_coder_compaction_restore_reading_nums\":5,\"v3_solo_coder_compaction_restore_skill_nums\":1,\"v3_solo_coder_cumulative_compaction_strategy\":\"compact_with_separate_model\",\"v3_stream_throttle_enabled\":true,\"v3_sub_agent_model_config_names\":{\"browser_use\":\"browser_use_subagent\",\"search\":\"search_agent_qwen_fast-0710\"},\"v3_sub_agent_unique_name_map\":{\"general_purpose_task\":\"general-purpose\",\"search\":\"Explore\"},\"web_fetch_strategy\":\"auto\",\"web_search_skip_crawler_when_snippet_exists\":true}",
+       "model_name": "kimi-k3__dev",
+       "prompt_max_tokens": 168000,
+       "tool_call_history_max_tokens": 0
+      },
+      {
+       "icon": {
+        "dark": "https://lf-cdn.trae.com.cn/obj/trae-com-cn/model/kimi-v2-dark.svg",
+        "light": "https://lf-cdn.trae.com.cn/obj/trae-com-cn/model/kimi-v2-light.svg"
+       },
+       "max_tokens": 64000,
+       "max_turn": 500,
+       "model_entitlement_usage_cost": 1,
+       "model_extra_config": "{\"Thinking\":{\"Type\":\"enabled\"},\"browser_has_blocking_tools\":false,\"c_model_skill_listing_move_to_session_init\":true,\"compact_skill_name_list\":[\"TRAE-browseruse\",\"TRAE-browseruse-external\"],\"compaction_strategy_by_trigger\":{\"auto_sync\":\"compact_with_kv_cache\"},\"context_window_nudge_on_tool_result_threshold_ratio\":0.5,\"context_window_nudge_on_user_input_threshold_ratio\":0.5,\"disable_diagnostics_tool\":true,\"disable_history_adapter\":true,\"disable_openpreview_tool\":true,\"disable_tool_result_xml_tag\":true,\"dynamic_tool_loading_cn_defer_execute\":true,\"enable_agent_capability_merge\":true,\"enable_agent_message_queue\":true,\"enable_ai_sandbox_awareness\":true,\"enable_auto_plan_mode\":true,\"enable_browser_ptc_tools\":true,\"enable_browser_screenshot_auto_read\":true,\"enable_browser_tools\":false,\"enable_browser_use_agent\":true,\"enable_command_exit_code_semantics\":true,\"enable_compact_reasoning_effort_alignment\":true,\"enable_compact_skill_content\":true,\"enable_compaction_reminder\":true,\"enable_computer_use_ptc_tools\":true,\"enable_content_loop_detection\":true,\"enable_duplicated_tool_calls_reminder\":true,\"enable_force_compress_by_history_length\":true,\"enable_general_purpose_sub_agent\":true,\"enable_generate_image\":true,\"enable_generate_video\":true,\"enable_inject_chat_memory_variables\":true,\"enable_llm_error_model_degrade\":true,\"enable_model_switch_and_tool_loop_guardrails\":true,\"enable_new_context_tool\":true,\"enable_obtain_after_new_context\":true,\"enable_parallel_tool_call_limit_in_pe\":false,\"enable_plan_agent\":true,\"enable_read_tool_image_to_text\":true,\"enable_read_tool_video_to_text\":true,\"enable_restate_chat_memory_when_render_summary\":true,\"enable_resume_subagent\":true,\"enable_retry_after_content_loop\":true,\"enable_retry_after_reasoning_loop\":true,\"enable_schedule_tool\":true,\"enable_shell_compatibility_reminder\":true,\"enable_task_output_tool\":true,\"enable_task_stop_tool\":true,\"enable_thought_duplicate_detection\":true,\"enable_web_search_allowed_domains\":true,\"enable_web_search_blocked_domains\":true,\"enhanced_command_ast_check_2605\":true,\"force_enable_mcp\":true,\"include_extra_info_tokens\":false,\"new_context_file_count_limit\":9,\"new_context_user_input_counts\":4,\"pass_all_extra_info\":true,\"read_tool_image_to_text_config_name\":\"multimodal_image_kimi-k2.5\",\"read_tool_video_to_text_config_name\":\"kimi-k2.7-code\",\"remove_computer_use_mcp_server_info\":true,\"repeated_toolcall_interrupt_count\":8,\"repeated_toolcall_override_count\":5,\"replace_todo_write_with_task_tools\":false,\"run_command_output_char_count\":20000,\"save_toolcall_result_config\":{\"RunCommand\":{\"enable\":true,\"threshold\":30000},\"Shell\":{\"enable\":true,\"threshold\":30000},\"WebFetch\":{\"enable\":true,\"threshold\":10000},\"run_mcp\":{\"enable\":true,\"threshold\":10000}},\"spawn_tool_name\":\"Agent\",\"stop_duplicated_tool_calls\":true,\"sub_agent_concurrency\":{\"enabled\":true,\"limit\":5},\"sub_agent_tool_family\":\"test\",\"todo_write_allow_partial_input\":true,\"tool_output_alignment\":{\"edit_minimal_output\":true,\"read_offset_zero_based\":true,\"write_minimal_output\":true},\"v2_detect_edit_file_linter_error\":true,\"v2_edit_file_linter_error_sleep_time\":2,\"v2_max_mode_enabled\":true,\"v2_max_toolcall_chars\":30000,\"v2_read_old_linter_error_enabled\":true,\"v2_search_codebase_max_tokens\":10000,\"v2_search_codebase_use_opt_logic\":true,\"v3_agent_tools_map\":{\"Plan\":[\"Shell\",\"StopCommand\",\"Read\",\"Grep\",\"Glob\",\"Skill\",\"TodoWrite\",\"WebFetch\",\"WebSearch\"],\"search\":[\"Shell\",\"StopCommand\",\"Read\",\"Grep\",\"Glob\",\"Skill\",\"TodoWrite\",\"WebFetch\",\"WebSearch\"]},\"v3_cc_aligned_linter_diagnostics\":true,\"v3_compaction_token_limit_ratio\":0.9,\"v3_custom_rules_max_chars\":60000,\"v3_disable_ls_tool\":true,\"v3_disable_nfc_dummy_tool\":true,\"v3_disable_search_codebase_tool\":true,\"v3_enable_ask_user_question_tool\":true,\"v3_enable_cat_n_line_number_format\":true,\"v3_enable_file_diff_resolver_v2\":true,\"v3_enable_interrupt_reminder\":true,\"v3_enable_multi_edit_tool\":false,\"v3_enable_skill_tool\":true,\"v3_enable_web_fetch_tool\":true,\"v3_glob_enable_no_ignore\":true,\"v3_grep_enable_hidden\":true,\"v3_grep_max_columns\":500,\"v3_grep_max_result_chars\":20000,\"v3_grep_post_sort\":true,\"v3_ls_max_result_chars\":40000,\"v3_micro_compact_config\":{\"gap_new_session_keep_rounds\":1,\"supported_tools\":[\"SearchCodebase\",\"GetDiagnostics\",\"OpenPreview\",\"Read\",\"Grep\",\"Glob\",\"LS\",\"Edit\",\"Write\",\"SearchReplace\",\"apply_patch\",\"Shell\",\"RunCommand\",\"CheckCommandStatus\",\"exec_command\",\"write_stdin\",\"WebSearch\",\"WebFetch\"]},\"v3_read_dedup_enabled\":true,\"v3_read_enable_truncation\":false,\"v3_read_max_content_byte_size\":131072,\"v3_replace_edit_tools_by_edit_file_update\":false,\"v3_replace_run_command_by_shell_tool\":true,\"v3_solo_coder_compaction_restore_char_budget\":25000,\"v3_solo_coder_compaction_restore_item_char_budget\":10000,\"v3_solo_coder_compaction_restore_reading_nums\":5,\"v3_solo_coder_compaction_restore_skill_nums\":1,\"v3_solo_coder_cumulative_compaction_strategy\":\"compact_with_separate_model\",\"v3_stream_throttle_enabled\":true,\"v3_sub_agent_model_config_names\":{\"browser_use\":\"browser_use_subagent\",\"search\":\"search_agent_qwen_fast-0710\"},\"v3_sub_agent_unique_name_map\":{\"general_purpose_task\":\"general-purpose\",\"search\":\"Explore\"},\"web_fetch_strategy\":\"auto\",\"web_search_skip_crawler_when_snippet_exists\":true}",
+       "model_name": "kimi-k3__max",
+       "prompt_max_tokens": 936000,
+       "tool_call_history_max_tokens": 0
+      }
+     ],
+     "reasoning_effort_config": {
+      "default_level": "extra_high",
+      "options": [
+       "light",
+       "high",
+       "extra_high"
+      ],
+      "support_thinking": true
+     },
+     "usage": "chat_completion"
+    }
+   ]
+  },
+  {
+   "function": "chat_v3",
+   "config_info_list": [
+    {
+     "config_name": "glm-5.2_advisor_doubao",
+     "config_source": 1,
+     "config_switch": true,
+     "context_window_tokens": {
+      "dev": 116000
+     },
+     "display_config": {
+      "can_use_super_model": false,
+      "commercial_info": {
+       "info": "",
+       "manual_usage": 0
+      },
+      "display_name": "GLM-5.2",
+      "fee_model_level": 2,
+      "is_beta": false,
+      "is_custom_model": false,
+      "is_new": false,
+      "max_mode": false,
+      "memory_display_config": {},
+      "model_capability": "reasoning_model",
+      "multimodal": false,
+      "tags": []
+     },
+     "display_contact_config": "{\"access\":{\"data\":{\"identity_list\":[0,5,1,2,3,100]}},\"consumption_rate\":{\"enable\":true,\"data\":{\"rate\":0.78}},\"reasoning\":{\"enable\":true}}",
+     "extra_config": "{\"apply_file_path\":true,\"enable_invalid_json_hint\":true,\"is_new_pe\":true,\"native_function_call\":true,\"use_v2_process\":true}",
+     "is_default": false,
+     "is_invisible_to_user": true,
+     "model_detail_list": [
+      {
+       "max_tokens": 16000,
+       "max_turn": 70,
+       "model_entitlement_usage_cost": 1,
+       "model_extra_config": "{\"cloud_agent_snippet_content_max_char_count\":20000,\"enable_content_loop_detection\":true,\"enable_duplicated_tool_calls_reminder\":true,\"enable_inject_chat_memory_variables\":true,\"enable_restate_chat_memory_when_render_summary\":true,\"enable_retry_after_content_loop\":true,\"enable_retry_after_reasoning_loop\":true,\"enable_retry_on_empty_response\":true,\"enable_retry_on_empty_tool_calls\":true,\"enable_search_replace_apply_in_chat\":true,\"repeated_toolcall_interrupt_count\":8,\"repeated_toolcall_override_count\":5,\"response_retry_global_max\":2,\"response_retry_rule_max\":{\"reasoning_loop\":2},\"stop_duplicated_tool_calls\":true,\"v2_max_toolcall_chars\":30000,\"v2_search_codebase_use_opt_logic\":true,\"v3_compaction_token_limit_ratio\":0.9,\"v3_disable_nfc_dummy_tool\":true,\"v3_enable_ask_user_question_tool\":false,\"v3_enable_skill_tool\":true,\"v3_enable_web_fetch_tool\":true,\"v3_grep_max_result_chars\":20000,\"v3_ls_max_result_chars\":20000,\"v3_micro_compact_config\":{\"gap_new_session_keep_rounds\":1,\"supported_tools\":[\"SearchCodebase\",\"GetDiagnostics\",\"OpenPreview\",\"Read\",\"Grep\",\"Glob\",\"LS\",\"Edit\",\"Write\",\"SearchReplace\",\"apply_patch\",\"Shell\",\"RunCommand\",\"CheckCommandStatus\",\"exec_command\",\"write_stdin\",\"WebSearch\",\"WebFetch\"]},\"v3_padding_line_num_before_line_content\":false,\"v3_read_enable_truncation\":false,\"v3_read_max_content_byte_size\":65536,\"v3_snippet_content_max_char_count\":20000,\"v3_solo_coder_compaction_restore_char_budget\":10000,\"v3_solo_coder_compaction_restore_item_char_budget\":4000,\"v3_solo_coder_compaction_restore_reading_nums\":5,\"v3_solo_coder_compaction_restore_skill_nums\":3,\"v3_solo_coder_cumulative_compaction_strategy\":\"compact_with_separate_model\"}",
+       "model_name": "glm-5.2__dev",
+       "prompt_max_tokens": 100000,
+       "tool_call_history_max_tokens": 0
+      }
+     ],
+     "usage": "chat_completion"
+    },
+    {
+     "config_name": "glm-5.2",
+     "config_source": 1,
+     "config_switch": true,
+     "context_window_tokens": {
+      "dev": 116000,
+      "max": 1000000
+     },
+     "display_config": {
+      "can_use_super_model": false,
+      "commercial_info": {
+       "info": "",
+       "manual_usage": 0
+      },
+      "display_name": "GLM-5.2",
+      "fee_model_level": 2,
+      "is_beta": false,
+      "is_custom_model": false,
+      "is_new": false,
+      "max_mode": true,
+      "memory_display_config": {},
+      "model_capability": "reasoning_model",
+      "multimodal": false,
+      "tags": []
+     },
+     "display_contact_config": "{\"access\":{\"data\":{\"identity_list\":[0,5,1,2,3,100]}},\"consumption_rate\":{\"enable\":true,\"data\":{\"rate\":0.78}},\"reasoning\":{\"enable\":true}}",
+     "extra_config": "{\"apply_file_path\":true,\"enable_invalid_json_hint\":true,\"is_new_pe\":true,\"native_function_call\":true,\"use_v2_process\":true}",
+     "is_default": false,
+     "is_invisible_to_user": false,
+     "model_detail_list": [
+      {
+       "icon": {
+        "dark": "https://lf-cdn.trae.com.cn/obj/trae-com-cn/model/glm-v3-dark.svg",
+        "light": "https://lf-cdn.trae.com.cn/obj/trae-com-cn/model/glm-v3-light.svg"
+       },
+       "max_tokens": 16000,
+       "max_turn": 70,
+       "model_entitlement_usage_cost": 1,
+       "model_extra_config": "{\"cloud_agent_snippet_content_max_char_count\":20000,\"enable_content_loop_detection\":true,\"enable_duplicated_tool_calls_reminder\":true,\"enable_inject_chat_memory_variables\":true,\"enable_llm_error_model_degrade\":true,\"enable_restate_chat_memory_when_render_summary\":true,\"enable_retry_after_content_loop\":true,\"enable_retry_after_reasoning_loop\":true,\"enable_retry_on_empty_response\":true,\"enable_retry_on_empty_tool_calls\":true,\"enable_search_replace_apply_in_chat\":true,\"repeated_toolcall_interrupt_count\":8,\"repeated_toolcall_override_count\":5,\"response_retry_global_max\":2,\"response_retry_rule_max\":{\"reasoning_loop\":2},\"stop_duplicated_tool_calls\":true,\"v2_max_toolcall_chars\":30000,\"v2_search_codebase_use_opt_logic\":true,\"v3_compaction_token_limit_ratio\":0.9,\"v3_disable_nfc_dummy_tool\":true,\"v3_enable_ask_user_question_tool\":false,\"v3_enable_skill_tool\":true,\"v3_enable_web_fetch_tool\":true,\"v3_grep_max_result_chars\":20000,\"v3_ls_max_result_chars\":20000,\"v3_micro_compact_config\":{\"gap_new_session_keep_rounds\":1,\"supported_tools\":[\"SearchCodebase\",\"GetDiagnostics\",\"OpenPreview\",\"Read\",\"Grep\",\"Glob\",\"LS\",\"Edit\",\"Write\",\"SearchReplace\",\"apply_patch\",\"Shell\",\"RunCommand\",\"CheckCommandStatus\",\"exec_command\",\"write_stdin\",\"WebSearch\",\"WebFetch\"]},\"v3_padding_line_num_before_line_content\":false,\"v3_read_enable_truncation\":false,\"v3_read_max_content_byte_size\":65536,\"v3_snippet_content_max_char_count\":20000,\"v3_solo_coder_compaction_restore_char_budget\":10000,\"v3_solo_coder_compaction_restore_item_char_budget\":4000,\"v3_solo_coder_compaction_restore_reading_nums\":5,\"v3_solo_coder_compaction_restore_skill_nums\":3,\"v3_solo_coder_cumulative_compaction_strategy\":\"compact_with_separate_model\"}",
+       "model_name": "glm-5.2__dev",
+       "prompt_max_tokens": 100000,
+       "tool_call_history_max_tokens": 0
+      },
+      {
+       "icon": {
+        "dark": "https://lf-cdn.trae.com.cn/obj/trae-com-cn/model/glm-v3-dark.svg",
+        "light": "https://lf-cdn.trae.com.cn/obj/trae-com-cn/model/glm-v3-light.svg"
+       },
+       "max_tokens": 64000,
+       "max_turn": 70,
+       "model_entitlement_usage_cost": 1,
+       "model_extra_config": "{\"cloud_agent_snippet_content_max_char_count\":20000,\"enable_content_loop_detection\":true,\"enable_duplicated_tool_calls_reminder\":true,\"enable_inject_chat_memory_variables\":true,\"enable_llm_error_model_degrade\":true,\"enable_restate_chat_memory_when_render_summary\":true,\"enable_retry_after_content_loop\":true,\"enable_retry_after_reasoning_loop\":true,\"enable_retry_on_empty_response\":true,\"enable_retry_on_empty_tool_calls\":true,\"enable_search_replace_apply_in_chat\":true,\"repeated_toolcall_interrupt_count\":8,\"repeated_toolcall_override_count\":5,\"response_retry_global_max\":2,\"response_retry_rule_max\":{\"reasoning_loop\":2},\"stop_duplicated_tool_calls\":true,\"v2_max_toolcall_chars\":30000,\"v2_search_codebase_use_opt_logic\":true,\"v3_compaction_token_limit_ratio\":0.9,\"v3_disable_nfc_dummy_tool\":true,\"v3_enable_ask_user_question_tool\":false,\"v3_enable_skill_tool\":true,\"v3_enable_web_fetch_tool\":true,\"v3_grep_max_result_chars\":20000,\"v3_ls_max_result_chars\":20000,\"v3_micro_compact_config\":{\"gap_new_session_keep_rounds\":1,\"supported_tools\":[\"SearchCodebase\",\"GetDiagnostics\",\"OpenPreview\",\"Read\",\"Grep\",\"Glob\",\"LS\",\"Edit\",\"Write\",\"SearchReplace\",\"apply_patch\",\"Shell\",\"RunCommand\",\"CheckCommandStatus\",\"exec_command\",\"write_stdin\",\"WebSearch\",\"WebFetch\"]},\"v3_padding_line_num_before_line_content\":false,\"v3_read_enable_truncation\":false,\"v3_read_max_content_byte_size\":131072,\"v3_snippet_content_max_char_count\":20000,\"v3_solo_coder_compaction_restore_char_budget\":10000,\"v3_solo_coder_compaction_restore_item_char_budget\":4000,\"v3_solo_coder_compaction_restore_reading_nums\":5,\"v3_solo_coder_compaction_restore_skill_nums\":3,\"v3_solo_coder_cumulative_compaction_strategy\":\"compact_with_separate_model\"}",
+       "model_name": "glm-5.2__max",
+       "prompt_max_tokens": 936000,
+       "tool_call_history_max_tokens": 0
+      }
+     ],
+     "reasoning_effort_config": {
+      "default_level": "high",
+      "options": [
+       "high",
+       "extra_high"
+      ],
+      "support_thinking": true
+     },
+     "usage": "chat_completion"
+    },
+    {
+     "config_name": "deepseek-v4.1-flash",
+     "config_source": 1,
+     "config_switch": true,
+     "context_window_tokens": {
+      "dev": 116000,
+      "max": 1000000
+     },
+     "display_config": {
+      "can_use_super_model": false,
+      "commercial_info": {
+       "info": "",
+       "manual_usage": 0
+      },
+      "display_name": "DeepSeek-V4-Flash 正式版",
+      "fee_model_level": 2,
+      "is_beta": false,
+      "is_custom_model": false,
+      "is_new": false,
+      "max_mode": true,
+      "memory_display_config": {},
+      "model_capability": "reasoning_model",
+      "multimodal": true,
+      "tags": []
+     },
+     "display_contact_config": "{\"access\":{\"data\":{\"identity_list\":[0,5,1,2,3,100]}},\"activity_discount\":{\"enable\":true,\"subKey\":\"off_peak_member_discount_18_9\",\"data\":{\"current\":{\"discount_type\":\"off_peak\",\"before_consumption_rate\":0.12,\"consumption_rate\":0.06,\"discount\":50},\"member\":{\"before_consumption_rate\":0.12,\"after_consumption_rate\":0.06,\"discount\":50},\"off_peak\":{\"before_consumption_rate\":0.12,\"after_consumption_rate\":0.06,\"discount\":50,\"time_windows\":[{\"weekdays\":[1,2,3,4,5],\"start_minute\":0,\"end_minute\":540},{\"weekdays\":[1,2,3,4,5],\"start_minute\":720,\"end_minute\":840},{\"weekdays\":[1,2,3,4,5],\"start_minute\":1080,\"end_minute\":1440},{\"weekdays\":[6,7],\"start_minute\":0,\"end_minute\":1440}],\"time_zone\":\"Asia/Shanghai\"}}},\"consumption_rate\":{\"enable\":true,\"data\":{\"rate\":0.06}},\"multimodal\":{\"enable\":true},\"reasoning\":{\"enable\":true}}",
+     "extra_config": "{\"apply_file_path\":true,\"enable_invalid_json_hint\":true,\"is_new_pe\":true,\"native_function_call\":true,\"use_v2_process\":true}",
+     "is_default": false,
+     "is_invisible_to_user": false,
+     "model_detail_list": [
+      {
+       "icon": {
+        "dark": "https://lf-cdn.trae.com.cn/obj/trae-com-cn/model/deepseek-dark.svg",
+        "light": "https://lf-cdn.trae.com.cn/obj/trae-com-cn/model/deepseek.svg"
+       },
+       "max_tokens": 16000,
+       "max_turn": 70,
+       "model_entitlement_usage_cost": 1,
+       "model_extra_config": "{\"cloud_agent_snippet_content_max_char_count\":20000,\"enable_content_loop_detection\":true,\"enable_duplicated_tool_calls_reminder\":true,\"enable_inject_chat_memory_variables\":true,\"enable_llm_error_model_degrade\":true,\"enable_restate_chat_memory_when_render_summary\":true,\"enable_retry_after_content_loop\":true,\"enable_retry_after_reasoning_loop\":true,\"enable_search_replace_apply_in_chat\":true,\"pass_all_extra_info\":true,\"repeated_toolcall_interrupt_count\":8,\"repeated_toolcall_override_count\":5,\"stop_duplicated_tool_calls\":true,\"v2_max_toolcall_chars\":30000,\"v2_search_codebase_use_opt_logic\":true,\"v3_compaction_token_limit_ratio\":0.9,\"v3_disable_nfc_dummy_tool\":true,\"v3_enable_ask_user_question_tool\":false,\"v3_enable_skill_tool\":true,\"v3_enable_web_fetch_tool\":true,\"v3_grep_max_result_chars\":20000,\"v3_ls_max_result_chars\":20000,\"v3_micro_compact_config\":{\"gap_new_session_keep_rounds\":1,\"supported_tools\":[\"SearchCodebase\",\"GetDiagnostics\",\"OpenPreview\",\"Read\",\"Grep\",\"Glob\",\"LS\",\"Edit\",\"Write\",\"SearchReplace\",\"apply_patch\",\"Shell\",\"RunCommand\",\"CheckCommandStatus\",\"exec_command\",\"write_stdin\",\"WebSearch\",\"WebFetch\"]},\"v3_padding_line_num_before_line_content\":false,\"v3_read_enable_truncation\":false,\"v3_read_max_content_byte_size\":65536,\"v3_snippet_content_max_char_count\":20000,\"v3_solo_coder_compaction_restore_char_budget\":10000,\"v3_solo_coder_compaction_restore_item_char_budget\":4000,\"v3_solo_coder_compaction_restore_reading_nums\":5,\"v3_solo_coder_compaction_restore_skill_nums\":3,\"v3_solo_coder_cumulative_compaction_strategy\":\"compact_with_separate_model\"}",
+       "model_name": "deepseek-v4.1-flash__dev",
+       "prompt_max_tokens": 100000,
+       "tool_call_history_max_tokens": 0
+      },
+      {
+       "icon": {
+        "dark": "https://lf-cdn.trae.com.cn/obj/trae-com-cn/model/deepseek-dark.svg",
+        "light": "https://lf-cdn.trae.com.cn/obj/trae-com-cn/model/deepseek.svg"
+       },
+       "max_tokens": 64000,
+       "max_turn": 70,
+       "model_entitlement_usage_cost": 1,
+       "model_extra_config": "{\"cloud_agent_snippet_content_max_char_count\":20000,\"enable_content_loop_detection\":true,\"enable_duplicated_tool_calls_reminder\":true,\"enable_inject_chat_memory_variables\":true,\"enable_llm_error_model_degrade\":true,\"enable_restate_chat_memory_when_render_summary\":true,\"enable_retry_after_content_loop\":true,\"enable_retry_after_reasoning_loop\":true,\"enable_search_replace_apply_in_chat\":true,\"pass_all_extra_info\":true,\"repeated_toolcall_interrupt_count\":8,\"repeated_toolcall_override_count\":5,\"stop_duplicated_tool_calls\":true,\"v2_max_toolcall_chars\":30000,\"v2_search_codebase_use_opt_logic\":true,\"v3_compaction_token_limit_ratio\":0.9,\"v3_disable_nfc_dummy_tool\":true,\"v3_enable_ask_user_question_tool\":false,\"v3_enable_skill_tool\":true,\"v3_enable_web_fetch_tool\":true,\"v3_grep_max_result_chars\":20000,\"v3_ls_max_result_chars\":20000,\"v3_micro_compact_config\":{\"gap_new_session_keep_rounds\":1,\"supported_tools\":[\"SearchCodebase\",\"GetDiagnostics\",\"OpenPreview\",\"Read\",\"Grep\",\"Glob\",\"LS\",\"Edit\",\"Write\",\"SearchReplace\",\"apply_patch\",\"Shell\",\"RunCommand\",\"CheckCommandStatus\",\"exec_command\",\"write_stdin\",\"WebSearch\",\"WebFetch\"]},\"v3_padding_line_num_before_line_content\":false,\"v3_read_enable_truncation\":false,\"v3_read_max_content_byte_size\":131072,\"v3_snippet_content_max_char_count\":20000,\"v3_solo_coder_compaction_restore_char_budget\":10000,\"v3_solo_coder_compaction_restore_item_char_budget\":4000,\"v3_solo_coder_compaction_restore_reading_nums\":5,\"v3_solo_coder_compaction_restore_skill_nums\":3,\"v3_solo_coder_cumulative_compaction_strategy\":\"compact_with_separate_model\"}",
+       "model_name": "deepseek-v4.1-flash__max",
+       "prompt_max_tokens": 936000,
+       "tool_call_history_max_tokens": 0
+      }
+     ],
+     "reasoning_effort_config": {
+      "default_level": "high",
+      "options": [
+       "light",
+       "high",
+       "extra_high"
+      ],
+      "support_thinking": true
+     },
+     "usage": "chat_completion"
+    },
+    {
+     "config_name": "kimi-k3",
+     "config_source": 1,
+     "config_switch": true,
+     "context_window_tokens": {
+      "dev": 200000,
+      "max": 1000000
+     },
+     "display_config": {
+      "can_use_super_model": false,
+      "commercial_info": {
+       "info": "",
+       "manual_usage": 0
+      },
+      "display_name": "Kimi-K3",
+      "fee_model_level": 2,
+      "is_beta": false,
+      "is_custom_model": false,
+      "is_new": false,
+      "max_mode": true,
+      "memory_display_config": {},
+      "model_capability": "chat_model",
+      "multimodal": true,
+      "tags": [],
+      "tool_response_multimodal": true
+     },
+     "display_contact_config": "{\"access\":{\"data\":{\"identity_list\":[0,5,1,2,3,100]}},\"consumption_rate\":{\"enable\":true,\"data\":{\"rate\":1.83}},\"multimodal\":{\"enable\":true},\"reasoning\":{\"enable\":true}}",
+     "extra_config": "{\"apply_file_path\":true,\"enable_invalid_json_hint\":true,\"is_new_pe\":true,\"native_function_call\":true,\"use_v2_process\":true}",
+     "is_default": false,
+     "is_invisible_to_user": false,
+     "model_detail_list": [
+      {
+       "icon": {
+        "dark": "https://lf-cdn.trae.com.cn/obj/trae-com-cn/model/kimi-v2-dark.svg",
+        "light": "https://lf-cdn.trae.com.cn/obj/trae-com-cn/model/kimi-v2-light.svg"
+       },
+       "max_tokens": 32000,
+       "max_turn": 200,
+       "model_entitlement_usage_cost": 1,
+       "model_extra_config": "{\"Thinking\":{\"Type\":\"enabled\"},\"cloud_agent_snippet_content_max_char_count\":20000,\"enable_content_loop_detection\":true,\"enable_duplicated_tool_calls_reminder\":true,\"enable_inject_chat_memory_variables\":true,\"enable_llm_error_model_degrade\":true,\"enable_restate_chat_memory_when_render_summary\":true,\"enable_retry_after_reasoning_loop\":true,\"enable_search_replace_apply_in_chat\":true,\"pass_all_extra_info\":true,\"repeated_toolcall_interrupt_count\":8,\"repeated_toolcall_override_count\":5,\"stop_duplicated_tool_calls\":true,\"v2_max_toolcall_chars\":30000,\"v2_search_codebase_use_opt_logic\":true,\"v3_compaction_token_limit_ratio\":0.9,\"v3_disable_nfc_dummy_tool\":true,\"v3_enable_ask_user_question_tool\":false,\"v3_enable_skill_tool\":true,\"v3_enable_web_fetch_tool\":true,\"v3_grep_max_result_chars\":20000,\"v3_ls_max_result_chars\":20000,\"v3_micro_compact_config\":{\"gap_new_session_keep_rounds\":1,\"supported_tools\":[\"SearchCodebase\",\"GetDiagnostics\",\"OpenPreview\",\"Read\",\"Grep\",\"Glob\",\"LS\",\"Edit\",\"Write\",\"SearchReplace\",\"apply_patch\",\"Shell\",\"RunCommand\",\"CheckCommandStatus\",\"exec_command\",\"write_stdin\",\"WebSearch\",\"WebFetch\"]},\"v3_padding_line_num_before_line_content\":false,\"v3_read_enable_truncation\":false,\"v3_read_max_content_byte_size\":65536,\"v3_snippet_content_max_char_count\":20000,\"v3_solo_coder_compaction_restore_char_budget\":10000,\"v3_solo_coder_compaction_restore_item_char_budget\":4000,\"v3_solo_coder_compaction_restore_reading_nums\":5,\"v3_solo_coder_compaction_restore_skill_nums\":3,\"v3_solo_coder_cumulative_compaction_strategy\":\"compact_with_separate_model\"}",
+       "model_name": "kimi-k3__dev",
+       "prompt_max_tokens": 168000,
+       "tool_call_history_max_tokens": 0
+      },
+      {
+       "icon": {
+        "dark": "https://lf-cdn.trae.com.cn/obj/trae-com-cn/model/kimi-v2-dark.svg",
+        "light": "https://lf-cdn.trae.com.cn/obj/trae-com-cn/model/kimi-v2-light.svg"
+       },
+       "max_tokens": 64000,
+       "max_turn": 200,
+       "model_entitlement_usage_cost": 1,
+       "model_extra_config": "{\"Thinking\":{\"Type\":\"enabled\"},\"cloud_agent_snippet_content_max_char_count\":20000,\"enable_content_loop_detection\":true,\"enable_duplicated_tool_calls_reminder\":true,\"enable_inject_chat_memory_variables\":true,\"enable_llm_error_model_degrade\":true,\"enable_restate_chat_memory_when_render_summary\":true,\"enable_retry_after_reasoning_loop\":true,\"enable_search_replace_apply_in_chat\":true,\"pass_all_extra_info\":true,\"repeated_toolcall_interrupt_count\":8,\"repeated_toolcall_override_count\":5,\"stop_duplicated_tool_calls\":true,\"v2_max_toolcall_chars\":30000,\"v2_search_codebase_use_opt_logic\":true,\"v3_compaction_token_limit_ratio\":0.9,\"v3_disable_nfc_dummy_tool\":true,\"v3_enable_ask_user_question_tool\":false,\"v3_enable_skill_tool\":true,\"v3_enable_web_fetch_tool\":true,\"v3_grep_max_result_chars\":20000,\"v3_ls_max_result_chars\":20000,\"v3_micro_compact_config\":{\"gap_new_session_keep_rounds\":1,\"supported_tools\":[\"SearchCodebase\",\"GetDiagnostics\",\"OpenPreview\",\"Read\",\"Grep\",\"Glob\",\"LS\",\"Edit\",\"Write\",\"SearchReplace\",\"apply_patch\",\"Shell\",\"RunCommand\",\"CheckCommandStatus\",\"exec_command\",\"write_stdin\",\"WebSearch\",\"WebFetch\"]},\"v3_padding_line_num_before_line_content\":false,\"v3_read_enable_truncation\":false,\"v3_read_max_content_byte_size\":131072,\"v3_snippet_content_max_char_count\":20000,\"v3_solo_coder_compaction_restore_char_budget\":10000,\"v3_solo_coder_compaction_restore_item_char_budget\":4000,\"v3_solo_coder_compaction_restore_reading_nums\":5,\"v3_solo_coder_compaction_restore_skill_nums\":3,\"v3_solo_coder_cumulative_compaction_strategy\":\"compact_with_separate_model\"}",
+       "model_name": "kimi-k3__max",
+       "prompt_max_tokens": 936000,
+       "tool_call_history_max_tokens": 0
+      }
+     ],
+     "reasoning_effort_config": {
+      "default_level": "extra_high",
+      "options": [
+       "light",
+       "high",
+       "extra_high"
+      ],
+      "support_thinking": true
+     },
+     "usage": "chat_completion"
+    }
+   ]
+  },
+  {
+   "function": "solo_work_lite",
+   "config_info_list": [
+    {
+     "config_name": "glm-5.2",
+     "config_source": 1,
+     "config_switch": true,
+     "context_window_tokens": {
+      "dev": 200000
+     },
+     "display_config": {
+      "can_use_super_model": false,
+      "commercial_info": {
+       "info": "",
+       "manual_usage": 0
+      },
+      "display_name": "GLM-5.2",
+      "fee_model_level": 2,
+      "is_beta": false,
+      "is_custom_model": false,
+      "is_new": false,
+      "max_mode": false,
+      "memory_display_config": {},
+      "model_capability": "reasoning_model",
+      "multimodal": false,
+      "tags": []
+     },
+     "display_contact_config": "{\"access\":{\"data\":{\"identity_list\":[0,5,1,2,3,100]}},\"consumption_rate\":{\"enable\":true,\"data\":{\"rate\":0.78}},\"reasoning\":{\"enable\":true}}",
+     "extra_config": "{\"apply_file_path\":true,\"enable_invalid_json_hint\":true,\"is_new_pe\":true,\"native_function_call\":true,\"use_v2_process\":true}",
+     "is_default": false,
+     "is_invisible_to_user": false,
+     "model_detail_list": [
+      {
+       "icon": {
+        "dark": "https://lf-cdn.trae.com.cn/obj/trae-com-cn/model/glm-v3-dark.svg",
+        "light": "https://lf-cdn.trae.com.cn/obj/trae-com-cn/model/glm-v3-light.svg"
+       },
+       "max_tokens": 32000,
+       "max_turn": 500,
+       "model_entitlement_usage_cost": 1,
+       "model_extra_config": "{\"c_model_skill_listing_move_to_session_init\":true,\"compact_skill_name_list\":[\"TRAE-browseruse\",\"TRAE-browseruse-external\"],\"disable_builtin_skill_guidance\":true,\"disable_history_adapter\":true,\"disable_openpreview_tool\":true,\"disable_tool_result_xml_tag\":true,\"dynamic_tool_loading_search\":false,\"enable_browser_ptc_tools\":true,\"enable_browser_screenshot_auto_read\":true,\"enable_browser_tools\":false,\"enable_browser_use_agent\":true,\"enable_compact_skill_content\":true,\"enable_compaction_reminder\":true,\"enable_computer_use_agent\":true,\"enable_computer_use_ptc_tools\":true,\"enable_content_loop_detection\":true,\"enable_duplicated_tool_calls_reminder\":true,\"enable_force_compress_by_history_length\":true,\"enable_generate_image\":true,\"enable_generate_video\":true,\"enable_inject_chat_memory_variables\":true,\"enable_llm_error_model_degrade\":true,\"enable_read_tool_image_to_text\":true,\"enable_restate_chat_memory_when_render_summary\":true,\"enable_retry_after_content_loop\":true,\"enable_retry_after_reasoning_loop\":true,\"enable_shell_compatibility_reminder\":true,\"enable_task_output_tool\":true,\"enable_task_stop_tool\":true,\"enable_thought_duplicate_detection\":true,\"include_extra_info_tokens\":false,\"read_tool_image_to_text_config_name\":\"multimodal_image_kimi-k2.5\",\"remove_computer_use_mcp_server_info\":true,\"run_command_max_blocking_ms\":300000,\"run_command_output_char_count\":20000,\"save_toolcall_result_config\":{\"WebFetch\":{\"enable\":true,\"threshold\":10000},\"run_mcp\":{\"enable\":true,\"threshold\":10000}},\"spawn_tool_name\":\"Agent\",\"stop_duplicated_tool_calls\":true,\"sub_agent_tool_family\":\"test\",\"todo_write_allow_partial_input\":true,\"tool_output_alignment\":{\"edit_minimal_output\":true,\"glob_max_results\":100,\"glob_relative_paths\":true,\"grep_default_head_limit\":250,\"grep_relative_paths\":true,\"read_offset_zero_based\":true,\"write_minimal_output\":true},\"v2_detect_edit_file_linter_error\":true,\"v2_edit_file_linter_error_sleep_time\":2,\"v2_max_mode_enabled\":true,\"v2_max_toolcall_chars\":30000,\"v2_read_old_linter_error_enabled\":true,\"v2_search_codebase_max_tokens\":10000,\"v2_search_codebase_use_opt_logic\":true,\"v3_compaction_token_limit_ratio\":0.9,\"v3_custom_rules_max_chars\":60000,\"v3_disable_glob_tool\":true,\"v3_disable_grep_tool\":true,\"v3_disable_ls_tool\":true,\"v3_disable_nfc_dummy_tool\":true,\"v3_enable_ask_user_question_tool\":true,\"v3_enable_cat_n_line_number_format\":true,\"v3_enable_interrupt_reminder\":true,\"v3_enable_multi_edit_tool\":false,\"v3_enable_skill_tool\":true,\"v3_enable_web_fetch_tool\":true,\"v3_file_read_state_cc_aligned\":false,\"v3_grep_max_result_chars\":20000,\"v3_ls_max_result_chars\":40000,\"v3_micro_compact_config\":{\"gap_new_session_keep_rounds\":1,\"supported_tools\":[\"SearchCodebase\",\"GetDiagnostics\",\"OpenPreview\",\"Read\",\"Grep\",\"Glob\",\"LS\",\"Edit\",\"Write\",\"SearchReplace\",\"apply_patch\",\"Shell\",\"RunCommand\",\"CheckCommandStatus\",\"exec_command\",\"write_stdin\",\"WebSearch\",\"WebFetch\"]},\"v3_read_enable_truncation\":false,\"v3_read_max_content_byte_size\":65536,\"v3_replace_edit_tools_by_edit_file_update\":false,\"v3_replace_run_command_by_shell_tool\":true,\"v3_solo_coder_compaction_restore_char_budget\":10000,\"v3_solo_coder_compaction_restore_item_char_budget\":4000,\"v3_solo_coder_compaction_restore_reading_nums\":5,\"v3_solo_coder_compaction_restore_skill_nums\":3,\"v3_solo_coder_cumulative_compaction_strategy\":\"compact_with_separate_model\",\"v3_stream_throttle_enabled\":true,\"v3_sub_agent_model_config_names\":{\"Explore\":\"explore_sub_agent_v2\",\"browser_use\":\"browser_use_subagent\",\"computer_use\":\"Doubao-Seed-2.1-Turbo\"},\"web_fetch_strategy\":\"auto\",\"web_search_skip_crawler_when_snippet_exists\":true}",
+       "model_name": "glm-5.2__dev",
+       "prompt_max_tokens": 168000,
+       "tool_call_history_max_tokens": 0
+      }
+     ],
+     "reasoning_effort_config": {
+      "support_thinking": false
+     },
+     "usage": "chat_completion"
+    },
+    {
+     "config_name": "deepseek-v4.1-flash",
+     "config_source": 1,
+     "config_switch": true,
+     "context_window_tokens": {
+      "dev": 200000
+     },
+     "display_config": {
+      "can_use_super_model": false,
+      "commercial_info": {
+       "info": "",
+       "manual_usage": 0
+      },
+      "display_name": "DeepSeek-V4.1-Flash",
+      "fee_model_level": 2,
+      "is_beta": false,
+      "is_custom_model": false,
+      "is_new": false,
+      "max_mode": false,
+      "memory_display_config": {},
+      "model_capability": "reasoning_model",
+      "multimodal": true,
+      "tags": [],
+      "tool_response_multimodal": true
+     },
+     "display_contact_config": "{\"access\":{\"data\":{\"identity_list\":[0,5,1,2,3,100]}},\"activity_discount\":{\"enable\":true,\"subKey\":\"off_peak_member_discount_18_9\",\"data\":{\"current\":{\"discount_type\":\"off_peak\",\"before_consumption_rate\":0.12,\"consumption_rate\":0.06,\"discount\":50},\"member\":{\"before_consumption_rate\":0.12,\"after_consumption_rate\":0.06,\"discount\":50},\"off_peak\":{\"before_consumption_rate\":0.12,\"after_consumption_rate\":0.06,\"discount\":50,\"time_windows\":[{\"weekdays\":[1,2,3,4,5],\"start_minute\":0,\"end_minute\":540},{\"weekdays\":[1,2,3,4,5],\"start_minute\":720,\"end_minute\":840},{\"weekdays\":[1,2,3,4,5],\"start_minute\":1080,\"end_minute\":1440},{\"weekdays\":[6,7],\"start_minute\":0,\"end_minute\":1440}],\"time_zone\":\"Asia/Shanghai\"}}},\"consumption_rate\":{\"enable\":true,\"data\":{\"rate\":0.06}},\"multimodal\":{\"enable\":true},\"reasoning\":{\"enable\":true}}",
+     "extra_config": "{\"apply_file_path\":true,\"enable_invalid_json_hint\":true,\"is_new_pe\":true,\"native_function_call\":true,\"use_v2_process\":true}",
+     "is_default": false,
+     "is_invisible_to_user": false,
+     "model_detail_list": [
+      {
+       "icon": {
+        "dark": "https://lf-cdn.trae.com.cn/obj/trae-com-cn/model/deepseek-dark.svg",
+        "light": "https://lf-cdn.trae.com.cn/obj/trae-com-cn/model/deepseek.svg"
+       },
+       "max_tokens": 32000,
+       "max_turn": 500,
+       "model_entitlement_usage_cost": 1,
+       "model_extra_config": "{\"Thinking\":{\"Type\":\"enabled\"},\"c_model_skill_listing_move_to_session_init\":true,\"compact_skill_name_list\":[\"TRAE-browseruse\",\"TRAE-browseruse-external\"],\"disable_builtin_skill_guidance\":true,\"disable_history_adapter\":true,\"disable_openpreview_tool\":true,\"disable_tool_result_xml_tag\":true,\"dynamic_tool_loading_search\":false,\"enable_browser_ptc_tools\":true,\"enable_browser_screenshot_auto_read\":true,\"enable_browser_tools\":false,\"enable_browser_use_agent\":true,\"enable_compact_skill_content\":true,\"enable_compaction_reminder\":true,\"enable_computer_use_agent\":true,\"enable_computer_use_ptc_tools\":true,\"enable_content_loop_detection\":true,\"enable_duplicated_tool_calls_reminder\":true,\"enable_force_compress_by_history_length\":true,\"enable_generate_image\":true,\"enable_generate_video\":true,\"enable_inject_chat_memory_variables\":true,\"enable_llm_error_model_degrade\":true,\"enable_restate_chat_memory_when_render_summary\":true,\"enable_retry_after_content_loop\":true,\"enable_retry_after_reasoning_loop\":true,\"enable_task_output_tool\":true,\"enable_task_stop_tool\":true,\"enable_thought_duplicate_detection\":true,\"include_extra_info_tokens\":false,\"pass_all_extra_info\":true,\"remove_computer_use_mcp_server_info\":true,\"run_command_max_blocking_ms\":300000,\"run_command_output_char_count\":20000,\"save_toolcall_result_config\":{\"WebFetch\":{\"enable\":true,\"threshold\":10000},\"run_mcp\":{\"enable\":true,\"threshold\":10000}},\"spawn_tool_name\":\"Agent\",\"stop_duplicated_tool_calls\":true,\"sub_agent_tool_family\":\"test\",\"todo_write_allow_partial_input\":true,\"tool_output_alignment\":{\"edit_minimal_output\":true,\"glob_max_results\":100,\"glob_relative_paths\":true,\"grep_default_head_limit\":250,\"grep_relative_paths\":true,\"read_offset_zero_based\":true,\"write_minimal_output\":true},\"v2_detect_edit_file_linter_error\":true,\"v2_edit_file_linter_error_sleep_time\":2,\"v2_max_mode_enabled\":true,\"v2_max_toolcall_chars\":30000,\"v2_read_old_linter_error_enabled\":true,\"v2_search_codebase_max_tokens\":10000,\"v2_search_codebase_use_opt_logic\":true,\"v3_compaction_token_limit_ratio\":0.9,\"v3_custom_rules_max_chars\":60000,\"v3_disable_glob_tool\":true,\"v3_disable_grep_tool\":true,\"v3_disable_ls_tool\":true,\"v3_disable_nfc_dummy_tool\":true,\"v3_enable_ask_user_question_tool\":true,\"v3_enable_cat_n_line_number_format\":true,\"v3_enable_interrupt_reminder\":true,\"v3_enable_multi_edit_tool\":false,\"v3_enable_skill_tool\":true,\"v3_enable_web_fetch_tool\":true,\"v3_file_read_state_cc_aligned\":false,\"v3_grep_max_result_chars\":20000,\"v3_ls_max_result_chars\":40000,\"v3_micro_compact_config\":{\"gap_new_session_keep_rounds\":1,\"supported_tools\":[\"SearchCodebase\",\"GetDiagnostics\",\"OpenPreview\",\"Read\",\"Grep\",\"Glob\",\"LS\",\"Edit\",\"Write\",\"SearchReplace\",\"apply_patch\",\"Shell\",\"RunCommand\",\"CheckCommandStatus\",\"exec_command\",\"write_stdin\",\"WebSearch\",\"WebFetch\"]},\"v3_read_enable_truncation\":false,\"v3_read_max_content_byte_size\":65536,\"v3_replace_edit_tools_by_edit_file_update\":false,\"v3_replace_run_command_by_shell_tool\":true,\"v3_solo_coder_compaction_restore_char_budget\":10000,\"v3_solo_coder_compaction_restore_item_char_budget\":4000,\"v3_solo_coder_compaction_restore_reading_nums\":5,\"v3_solo_coder_compaction_restore_skill_nums\":3,\"v3_solo_coder_cumulative_compaction_strategy\":\"compact_with_separate_model\",\"v3_stream_throttle_enabled\":true,\"v3_sub_agent_model_config_names\":{\"Explore\":\"explore_sub_agent_v2\",\"browser_use\":\"browser_use_subagent\",\"computer_use\":\"Doubao-Seed-2.1-Turbo\"},\"web_fetch_strategy\":\"auto\",\"web_search_skip_crawler_when_snippet_exists\":true}",
+       "model_name": "deepseek-v4.1-flash__dev",
+       "prompt_max_tokens": 168000,
+       "tool_call_history_max_tokens": 0
+      }
+     ],
+     "reasoning_effort_config": {
+      "support_thinking": false
+     },
+     "usage": "chat_completion"
+    },
+    {
+     "config_name": "kimi-k3",
+     "config_source": 1,
+     "config_switch": true,
+     "context_window_tokens": {
+      "dev": 200000
+     },
+     "display_config": {
+      "can_use_super_model": false,
+      "commercial_info": {
+       "info": "",
+       "manual_usage": 0
+      },
+      "display_name": "Kimi-K3",
+      "fee_model_level": 2,
+      "is_beta": false,
+      "is_custom_model": false,
+      "is_new": false,
+      "max_mode": false,
+      "memory_display_config": {},
+      "model_capability": "reasoning_model",
+      "multimodal": true,
+      "tags": [],
+      "tool_response_multimodal": true
+     },
+     "display_contact_config": "{\"access\":{\"data\":{\"identity_list\":[0,5,1,2,3,100]}},\"consumption_rate\":{\"enable\":true,\"data\":{\"rate\":1.83}},\"multimodal\":{\"enable\":true},\"reasoning\":{\"enable\":true}}",
+     "extra_config": "{\"apply_file_path\":true,\"enable_invalid_json_hint\":true,\"is_new_pe\":true,\"native_function_call\":true,\"use_v2_process\":true}",
+     "is_default": false,
+     "is_invisible_to_user": false,
+     "model_detail_list": [
+      {
+       "icon": {
+        "dark": "https://lf-cdn.trae.com.cn/obj/trae-com-cn/model/kimi-v2-dark.svg",
+        "light": "https://lf-cdn.trae.com.cn/obj/trae-com-cn/model/kimi-v2-light.svg"
+       },
+       "max_tokens": 32000,
+       "max_turn": 500,
+       "model_entitlement_usage_cost": 1,
+       "model_extra_config": "{\"Thinking\":{\"Type\":\"enabled\"},\"c_model_skill_listing_move_to_session_init\":true,\"compact_skill_name_list\":[\"TRAE-browseruse\",\"TRAE-browseruse-external\"],\"disable_builtin_skill_guidance\":true,\"disable_history_adapter\":true,\"disable_openpreview_tool\":true,\"disable_tool_result_xml_tag\":true,\"dynamic_tool_loading_search\":false,\"enable_browser_ptc_tools\":true,\"enable_browser_screenshot_auto_read\":true,\"enable_browser_tools\":false,\"enable_browser_use_agent\":true,\"enable_compact_skill_content\":true,\"enable_compaction_reminder\":true,\"enable_computer_use_ptc_tools\":true,\"enable_content_loop_detection\":true,\"enable_duplicated_tool_calls_reminder\":true,\"enable_force_compress_by_history_length\":true,\"enable_generate_image\":true,\"enable_generate_video\":true,\"enable_inject_chat_memory_variables\":true,\"enable_llm_error_model_degrade\":true,\"enable_restate_chat_memory_when_render_summary\":true,\"enable_retry_after_content_loop\":true,\"enable_retry_after_reasoning_loop\":true,\"enable_task_output_tool\":true,\"enable_task_stop_tool\":true,\"enable_thought_duplicate_detection\":true,\"include_extra_info_tokens\":false,\"pass_all_extra_info\":true,\"remove_computer_use_mcp_server_info\":true,\"run_command_max_blocking_ms\":300000,\"run_command_output_char_count\":20000,\"save_toolcall_result_config\":{\"WebFetch\":{\"enable\":true,\"threshold\":10000},\"run_mcp\":{\"enable\":true,\"threshold\":10000}},\"spawn_tool_name\":\"Agent\",\"stop_duplicated_tool_calls\":true,\"sub_agent_tool_family\":\"test\",\"todo_write_allow_partial_input\":true,\"tool_output_alignment\":{\"edit_minimal_output\":true,\"glob_max_results\":100,\"glob_relative_paths\":true,\"grep_default_head_limit\":250,\"grep_relative_paths\":true,\"read_offset_zero_based\":true,\"write_minimal_output\":true},\"v2_detect_edit_file_linter_error\":true,\"v2_edit_file_linter_error_sleep_time\":2,\"v2_max_mode_enabled\":true,\"v2_max_toolcall_chars\":30000,\"v2_read_old_linter_error_enabled\":true,\"v2_search_codebase_max_tokens\":10000,\"v2_search_codebase_use_opt_logic\":true,\"v3_compaction_token_limit_ratio\":0.9,\"v3_custom_rules_max_chars\":60000,\"v3_disable_glob_tool\":true,\"v3_disable_grep_tool\":true,\"v3_disable_ls_tool\":true,\"v3_disable_nfc_dummy_tool\":true,\"v3_enable_ask_user_question_tool\":true,\"v3_enable_cat_n_line_number_format\":true,\"v3_enable_interrupt_reminder\":true,\"v3_enable_multi_edit_tool\":false,\"v3_enable_skill_tool\":true,\"v3_enable_web_fetch_tool\":true,\"v3_file_read_state_cc_aligned\":false,\"v3_grep_max_result_chars\":20000,\"v3_ls_max_result_chars\":40000,\"v3_micro_compact_config\":{\"gap_new_session_keep_rounds\":1,\"supported_tools\":[\"SearchCodebase\",\"GetDiagnostics\",\"OpenPreview\",\"Read\",\"Grep\",\"Glob\",\"LS\",\"Edit\",\"Write\",\"SearchReplace\",\"apply_patch\",\"Shell\",\"RunCommand\",\"CheckCommandStatus\",\"exec_command\",\"write_stdin\",\"WebSearch\",\"WebFetch\"]},\"v3_read_enable_truncation\":false,\"v3_read_max_content_byte_size\":65536,\"v3_replace_edit_tools_by_edit_file_update\":false,\"v3_replace_run_command_by_shell_tool\":true,\"v3_solo_coder_compaction_restore_char_budget\":10000,\"v3_solo_coder_compaction_restore_item_char_budget\":4000,\"v3_solo_coder_compaction_restore_reading_nums\":5,\"v3_solo_coder_compaction_restore_skill_nums\":3,\"v3_solo_coder_cumulative_compaction_strategy\":\"compact_with_separate_model\",\"v3_stream_throttle_enabled\":true,\"v3_sub_agent_model_config_names\":{\"Explore\":\"explore_sub_agent_v2\",\"browser_use\":\"browser_use_subagent\"},\"web_fetch_strategy\":\"auto\",\"web_search_skip_crawler_when_snippet_exists\":true}",
+       "model_name": "kimi-k3__dev",
+       "prompt_max_tokens": 168000,
+       "tool_call_history_max_tokens": 0
+      }
+     ],
+     "reasoning_effort_config": {
+      "support_thinking": false
+     },
+     "usage": "chat_completion"
+    }
+   ]
+  }
+ ]
+}

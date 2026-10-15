@@ -58,6 +58,18 @@ func applyUpstream(up *upstream.Client, c *Config) {
 		time.Duration(c.Upstream.IdleTimeoutSeconds)*time.Second,
 	)
 	upstream.SetIdentity(c.Upstream.UserAgent, c.Upstream.ClientVersion)
+	// agent 基址：显式配置优先，留空回落内置常量；两者都只是「兜底」——
+	// domains.go 的自动发现一旦拿到结果就覆盖它们（见 Client.effectiveAgentBase）。
+	// 这里**必须显式写回**（不能只在非空时赋值）：否则面板里清空该项后，旧值会留在
+	// 结构体里，用户以为清掉了其实没有。
+	up.AgentHost = c.Upstream.AgentHost
+	if up.AgentHost == "" {
+		up.AgentHost = upstream.AgentHost
+	}
+	up.AgentHostIntl = c.Upstream.AgentHostIntl
+	if up.AgentHostIntl == "" {
+		up.AgentHostIntl = upstream.AgentHostIntl
+	}
 }
 
 // usagePathFor 由 state 文件路径推出用量台账路径：同目录、文件名 usage.json。
@@ -171,6 +183,7 @@ func main() {
 		DefaultModel:      cfg.DefaultModel,
 		PromptMode:        cfg.Prompt.Mode,
 		PromptText:        cfg.PromptText,
+		MaxFunction:       cfg.Upstream.MaxFunction,
 		Session:           sess,
 		Usage:             rec,
 		RequestLog:        rlog,
@@ -217,6 +230,7 @@ func main() {
 				DefaultModel: next.DefaultModel,
 				PromptMode:   next.Prompt.Mode,
 				PromptText:   next.PromptText,
+				MaxFunction:  next.Upstream.MaxFunction,
 				APIKey:       next.APIKey,
 			})
 			pn.ApplyAPIKey(next.APIKey) // 面板自己也认新密钥，否则保存完就把自己挡在门外
@@ -234,6 +248,10 @@ func main() {
 	go sch.Run(ctx)
 	// 启动补跑：排程定在 9 点而进程 10 点才起来是常态，不补跑等于当天整天不签。
 	go sch.CatchUp()
+	// agent 基址的动态发现（TNC get_domains/v5）：首轮在后台跑，不阻塞启动；
+	// 失败或关掉都只是回落常量，不影响出流。见 internal/upstream/domains.go。
+	up.StartHostDiscovery(ctx, cfg.Upstream.HostDiscovery,
+		time.Duration(cfg.Upstream.HostDiscoveryHours)*time.Hour)
 
 	srv := &http.Server{
 		Addr:              cfg.Listen,

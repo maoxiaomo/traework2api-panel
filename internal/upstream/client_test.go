@@ -417,10 +417,15 @@ func TestPickOfficialModels(t *testing.T) {
 // 为什么断言字面值而不是常量：常量会被一起改掉，测试就跟着"通过"了。这里钉的是
 // **实际上线的值**——function / AppID / 主机 / 版本码 任意一项漂到 IDE 口径，模型表、
 // 门控（k3 那次就是版本码决定的）、计费归属都会跟着变，必须在这条测试上先响。
+//
+// 2026-10-15 更新过 wantAgentHost（trae-api-cn → api5-normal）：这是**域迁移**不是口径漂移，
+// 官方客户端（Trae CN 1.1.3）已全量换域，旧域名当时仍返回 401 而非 404。同批实测确认
+// function / AppID / ClientID / 路径 / 版本码全部**未变**，模型表在新域名上逐字一致。
+// ClientID 尤其不能动：refresh token 按 ClientID 铸，跨档换票恒 400 10101（见 constants.go）。
 func TestWorkChannelIdentityFrozen(t *testing.T) {
 	const (
 		wantFunction  = "solo_work_lite"
-		wantAgentHost = "https://trae-api-cn.mchost.guru"
+		wantAgentHost = "https://api5-normal.mchost.guru"
 		wantUgHost    = "https://api.trae.cn"
 		wantChatPath  = "/api/agent/v3/llm_utils_chat"
 		wantModelPath = "/api/ide/v1/get_detail_param"

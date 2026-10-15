@@ -211,6 +211,19 @@ type Client struct {
 	UgHost        string // https://api.trae.cn
 	OAuthHost     string // https://api.trae.com.cn
 	ClientID      string // en1oxy7wnw8j9n
+
+	// ── agent 基址的动态发现（见 domains.go）────────────────────────────
+	// hostMu 保护下面四个：DiscoverHosts 在后台写，请求路径并发读。
+	// 与 timeoutMu 分开：那组是热改超时用的，这组是域名表刷新用的，锁的粒度与
+	// 持锁时长都不一样（发现持锁仅覆盖赋值，不跨网络请求）。
+	hostMu       sync.RWMutex
+	dynAgentCN   string    // 发现出来的国服 agent 基址（空 = 未发现，回落常量）
+	dynAgentIntl string    // 同上，国际版
+	dynAgentAt   time.Time // 最近一次成功写入的时刻（面板展示）
+
+	// discoveryCli 发现专用 HTTP 客户端（短超时）。nil 时按内置短超时新建，
+	// 不受热改的 120s 运行期超时影响，也不占用 HTTP 那套长超时语义。
+	discoveryCli *http.Client
 }
 
 // New 生产默认值。配置连接池减少 TLS 握手。
@@ -237,15 +250,14 @@ func (c *Client) ugBase() string    { return c.UgHost }
 func (c *Client) oauthBase() string { return c.OAuthHost }
 
 // agentBaseFor 按账号地区选 agent host（对话 + 模型表都走这里）。
+// 优先用 domains.go 动态发现出来的具体后端，其次显式配置，最后内置常量。
 // Auth 为 nil（如配置校验路径）按国内版。
 func (c *Client) agentBaseFor(a *auth.Auth) string {
-	if a != nil && a.Realm() == auth.RealmIntl {
-		if c.AgentHostIntl != "" {
-			return c.AgentHostIntl
-		}
-		return AgentHostIntl
+	realm := auth.RealmCN
+	if a != nil {
+		realm = a.Realm()
 	}
-	return c.agentBase()
+	return c.effectiveAgentBase(realm)
 }
 
 // identFor 账号地区对应的身份版本组（User-Agent / X-Ide-Version / *-Version-Code）。
@@ -438,6 +450,29 @@ type ModelInfo struct {
 	// kimi-k2.8-preview / glm-5.3-flashx 四个全是这样；chat 配置表里有的模型传不传都行，
 	// 所以只对这批复单放行，不动现有流量的报文形状）。
 	PickOnly bool
+
+	// DevModelName / MaxModelName 上游表里这个模型的两种**变体名**
+	// （model_detail_list[].model_name 原样，形如 "glm-5.2__dev" / "glm-5.2__max"）。
+	//
+	// 出站 model 填的是变体名，config_name 仍填裸的 ID：2026-10-15 实测
+	// body{config_name:"glm-5.2", model:"glm-5.2__dev"} 与 {..."__max"} 在
+	// solo_work_lite / chat_v3 / solo_agent 三个面上都 200，正文与 usage 齐全。
+	//
+	// ⚠️ 变体名**不能由 ID 拼**——全表 417 条带后缀的变体名里 99 条不满足
+	// ID+后缀（search_agent_qwen_fast→search_agent_model__max、
+	// glm-5.2_advisor_doubao→glm-5.2__dev、custom_model_kimi→custom_model_placeholder__dev）。
+	// 所以这里只存**读到的原值**，取不到就是空串，绝不猜。见 variantNames。
+	DevModelName string
+	MaxModelName string
+}
+
+// MaxAvailable 这个模型有没有「更大的 Max 窗口」。
+//
+// 两个条件都要：① 上游表里真有 __max 变体名；② 客户端声明的 max 口径大于 dev 口径。
+// 只有 ① 的（solo_work_lite 面上 12 个条目有 __max 名但 ctx_max 与 dev 相同）
+// 开了也不增长，开了等于没开，如实报 false。
+func (mi ModelInfo) MaxAvailable() bool {
+	return mi.MaxModelName != "" && mi.ContextMax > mi.ContextWindow
 }
 
 // paramConfig 是 get_detail_param 响应里的一条模型配置。
@@ -518,11 +553,17 @@ func pickOfficialModels(list []paramConfig, a *auth.Auth, function string) []Mod
 		if function == FunctionCoder && strings.HasPrefix(cfg.ConfigName, "search_agent") {
 			continue
 		}
+		devName, maxName := variantNames(cfg)
 		mi := ModelInfo{
 			ID:            cfg.ConfigName,
 			Name:          cfg.DisplayConfig.DisplayName,
 			ContextWindow: cfg.ContextWindowTokens.Dev,
 			Function:      function,
+			// 单 function 视图也给变体名：只在老视图里出现的模型也要能开 Max。
+			// 不过这条路取的变体名可能不准（老视图的 model_name 与 ID 对不上时取空），
+			// 取空就是「没有 Max」——宁可少一个开关，不给一个发出去没用的名字。
+			DevModelName: devName,
+			MaxModelName: maxName,
 		}
 		if len(cfg.ModelDetailList) > 0 {
 			mi.MaxTokens = cfg.ModelDetailList[0].MaxTokens
@@ -595,6 +636,31 @@ type catalogMeta struct {
 	Image       bool
 	HasImage    bool
 	HasDevEntry bool // model_detail_list 里有 __dev 条目 = 可调用实证
+	// DevName / MaxName 上游表里两种变体名（model_detail_list[].model_name 原样）。
+	// 见 ModelInfo.DevModelName 的实测说明：**不能由 ID 拼**。
+	DevName, MaxName string
+}
+
+// variantNames 从 model_detail_list 里取两种变体名（表里没有则为空）。
+//
+// ⚠️ 只能这么取。2026-10-15 全表实测：417 条带后缀的变体名里有 **99 条 ≠ config_name+后缀**：
+//
+//	config_name=search_agent_qwen_fast → model_name=search_agent_model__max（多个 config 共用一个变体名）
+//	config_name=glm-5.2_advisor_doubao  → model_name=glm-5.2__dev（advisor 槽位复用基础模型的变体名）
+//	config_name=custom_model_kimi       → model_name=custom_model_placeholder__dev
+//
+// 按 config_name 拼出来的名字上游认不出，会静默拿到 dev 行为。
+func variantNames(ci paramConfig) (dev, mx string) {
+	for _, d := range ci.ModelDetailList {
+		name := strings.TrimSpace(d.ModelName)
+		switch {
+		case dev == "" && strings.HasSuffix(name, "__dev"):
+			dev = name
+		case mx == "" && strings.HasSuffix(name, "__max"):
+			mx = name
+		}
+	}
+	return dev, mx
 }
 
 // contactRate 从 display_contact_config 这段 JSON 字符串里取基准积分倍率
@@ -650,11 +716,8 @@ func (ci paramConfig) meta() catalogMeta {
 	if ci.DisplayConfig.Multimodal != nil {
 		m.Image, m.HasImage = *ci.DisplayConfig.Multimodal, true
 	}
-	for _, d := range ci.ModelDetailList {
-		if strings.HasSuffix(d.ModelName, "__dev") {
-			m.HasDevEntry = true
-		}
-	}
+	m.DevName, m.MaxName = variantNames(ci)
+	m.HasDevEntry = m.DevName != ""
 	return m
 }
 
@@ -743,6 +806,8 @@ func mergeCatalog(list []ModelInfo, cat map[string]catalogMeta, a *auth.Auth) []
 			list[i].ContextWindow = m.Dev
 		}
 		list[i].ContextMax = m.Max
+		// 变体名以批量视图（客户端选择器）为准：它才是权威那份。
+		list[i].DevModelName, list[i].MaxModelName = m.DevName, m.MaxName
 		if m.HasRate {
 			r := m.Rate
 			list[i].Rate = &r
@@ -766,7 +831,8 @@ func mergeCatalog(list []ModelInfo, cat map[string]catalogMeta, a *auth.Auth) []
 		if seen[key] || !m.Visible {
 			continue
 		}
-		mi := ModelInfo{ID: m.ID, Name: m.Label, ContextWindow: m.Dev, ContextMax: m.Max, Function: Function, PickOnly: true}
+		mi := ModelInfo{ID: m.ID, Name: m.Label, ContextWindow: m.Dev, ContextMax: m.Max, Function: Function, PickOnly: true,
+			DevModelName: m.DevName, MaxModelName: m.MaxName}
 		if m.HasRate {
 			r := m.Rate
 			mi.Rate = &r
@@ -947,6 +1013,18 @@ func (c *Client) ugBaseFor(a *auth.Auth) string {
 }
 
 // entUsagePack 一个套餐包的原始字段（国内 v2 与国际 v1 同形）。
+//
+// ⚠️ 两个地区**不是同一个口径**，字段名也不同（2026-10-15 实测，两国版本同时抓）：
+//
+//	国内 is_dollar_usage_billing=false / is_credits_billing=true
+//	    额度 quota.credits_limit、已用 usage.credits_amount（basic_usage_limit 键**根本不存在**）
+//	国际 is_dollar_usage_billing=true
+//	    额度 quota.basic_usage_limit、已用 usage.basic_usage_amount（credits_limit 恒 0）
+//
+// 所以「国际版免费号显示 0 积分」不是接口坏了、也不是上游真没额度：是拿积分字段去读了一个
+// 美元计费的账号。实测国际 Free plan：basic_usage_limit=1（$1）且 basic_usage_amount=0.00059。
+// 判别只能用顶层 is_dollar_usage_billing，**不能**靠「basic_usage_limit 有没有值」——
+// 国内版该键是缺失的，缺失与 0 在 JSON 里都是零值，分不开。
 type entUsagePack struct {
 	DisplayDesc         string `json:"display_desc"`
 	GroupName           string `json:"group_name"`
@@ -962,11 +1040,50 @@ type entUsagePack struct {
 			// CreditsLimit 用 float64：上游可能给 2000.0 这种形态，int64 会让**整包**反序列化
 			// 失败并连带丢掉余额（实测 json.Unmarshal 报 cannot unmarshal number 2000.0）。
 			CreditsLimit float64 `json:"credits_limit"`
+			// BasicUsageLimit 国际版的美元额度（Free plan=1=「$1 免费额度」，Pro 月付=20）。
+			BasicUsageLimit float64 `json:"basic_usage_limit"`
+			// BonusUsageLimit 赠送额度，两地区都可能出现（实测国际 Free plan=0）。
+			BonusUsageLimit float64 `json:"bonus_usage_limit"`
 		} `json:"quota"`
 	} `json:"entitlement_base_info"`
 	Usage struct {
 		CreditsAmount float64 `json:"credits_amount"`
+		// BasicUsageAmount 国际版的美元已用量。实测 $0.00059 —— **必须 float**，
+		// 走 int64 会截断成 0，面板就会显示成「一分没用」。
+		BasicUsageAmount float64 `json:"basic_usage_amount"`
+		BonusUsageAmount float64 `json:"bonus_usage_amount"`
 	} `json:"usage"`
+}
+
+// 额度口径常量。
+const (
+	UnitCredit = "credit" // 国内：积分制
+	UnitUSD    = "usd"    // 国际：按量计费（美元）
+)
+
+// EntUsage 一次额度查询的完整口径。
+//
+// 两种口径**不可换算**，所以不做任何折算：Unit 标明用的是哪一套，各自只填自己那几个字段。
+// 面板按 Unit 决定显示「剩余/总额 积分」还是「$已用 / $额度」。
+type EntUsage struct {
+	Unit string // UnitCredit | UnitUSD
+	// 积分口径（Unit=UnitCredit 时有效）
+	Remain, Total int64
+	// 美元口径（Unit=UnitUSD 时有效）
+	UsedUSD, LimitUSD float64
+	Expire            int64
+}
+
+// ExpireAt 统一的到期时刻（两口径同一来源：packExpiry）。
+func (u EntUsage) ExpireAt() int64 { return u.Expire }
+
+// RemainUSD 剩余美元（不足 0 钳 0）。
+func (u EntUsage) RemainUSD() float64 {
+	r := u.LimitUSD - u.UsedUSD
+	if r < 0 {
+		return 0
+	}
+	return r
 }
 
 // packExpiry 包的到期时刻：expire_time → entitlement_base_info.end_time → yearly_expire_time。
@@ -981,61 +1098,107 @@ func packExpiry(p entUsagePack) int64 {
 	return 0
 }
 
-// UserEntUsage 返回剩余积分、积分总额与最早的积分到期时间。
-// 每个 credits_limit>0 的包：remain += limit - used，
-// used 为 usage.credits_amount（与 cmd/credit 同一口径，截断为整数）。
-//
-// 到期时间取两档（见下 packExpiry 注释）：
-//  1. 有积分面额的包里最早的一个未到期时刻——这是「积分到期」，也是选号「快过期优先」的依据；
-//  2. 一个积分包都没有时（国际版免费号只有 Free plan，credits_limit=0），回落到所有包的
-//     周期截止 end_time——否则国际号的「到期日期」恒为空，面板看着像功能坏了。
-//
-// 国际版走 v1 路径 + 计费网关（见 entUsagePath / ugBaseFor）。
-func (c *Client) UserEntUsage(a *auth.Auth) (remain, total, expire int64, err error) {
+// entUsageResponse 额度接口的响应外壳（两地区同形，差异全在 entUsagePack 的字段口径里）。
+type entUsageResponse struct {
+	IsCreditsBilling  bool `json:"is_credits_billing"`
+	IsDollarUsageBill bool `json:"is_dollar_usage_billing"`
+	// UserEntitlementPackList 套餐列表（两地区同形，见 entUsagePack）。
+	UserEntitlementPackList []entUsagePack `json:"user_entitlement_pack_list"`
+}
+
+// fetchEntUsage 打额度接口并解析（两地区共用，路径与网关见 entUsagePath / ugBaseFor）。
+func (c *Client) fetchEntUsage(a *auth.Auth) (entUsageResponse, error) {
+	var resp entUsageResponse
 	req, err := http.NewRequest(http.MethodPost, c.ugBaseFor(a)+entUsagePath(a), bytes.NewReader([]byte(entUsageBody)))
 	if err != nil {
-		return 0, 0, 0, err
+		return resp, err
 	}
 	UgHeaders(req, a)
 	data, err := c.doJSON(req)
 	if err != nil {
-		return 0, 0, 0, err
-	}
-	var resp struct {
-		IsCreditsBilling bool `json:"is_credits_billing"`
-		// UserEntitlementPackList 套餐列表（两地区同形，见 entUsagePack）。
-		UserEntitlementPackList []entUsagePack `json:"user_entitlement_pack_list"`
+		return resp, err
 	}
 	if err := json.Unmarshal(data, &resp); err != nil {
-		return 0, 0, 0, fmt.Errorf("ent usage parse: %w", err)
+		return resp, fmt.Errorf("ent usage parse: %w", err)
 	}
 	if len(resp.UserEntitlementPackList) == 0 {
 		// 空包列表 = 接口返回了异常结构（未登录/风控/结构变了），**不是**「剩余 0 分」。
 		// 当成 0 分会把好号的积分静默清零（面板显示 0、选号权重一起塌），照
 		// star620/TraeTools 的判据：宁可报解析失败，让调用方保留上一次的值。
-		return 0, 0, 0, errors.New("ent usage: 包列表为空（接口异常，不当作 0 分）")
+		return resp, errors.New("ent usage: 包列表为空（接口异常，不当作 0 分）")
+	}
+	return resp, nil
+}
+
+// UserEntUsageDetail 返回**口径感知**的额度快照：国内给积分、国际给美元。
+//
+// 判别只用顶层 is_dollar_usage_billing（实测国内 false、国际 true）；不看字段有没有值，
+// 因为国内版根本没有 basic_usage_limit 这个键，缺失与 0 分不开。
+//
+// 到期时间取两档（见 packExpiry 注释）：
+//  1. 有额度的包里最早的一个未到期时刻——这是「额度到期」，也是选号「快过期优先」的依据；
+//  2. 一个额度包都没有时（例如异常号），回落到所有包的周期截止 end_time。
+func (c *Client) UserEntUsageDetail(a *auth.Auth) (EntUsage, error) {
+	resp, err := c.fetchEntUsage(a)
+	if err != nil {
+		return EntUsage{}, err
+	}
+	u := EntUsage{Unit: UnitCredit}
+	if resp.IsDollarUsageBill {
+		u.Unit = UnitUSD
 	}
 	now := time.Now().Unix()
-	var expireCredit, expireAny int64
+	var expireQuota, expireAny int64
 	for _, p := range resp.UserEntitlementPackList {
 		e := packExpiry(p)
 		if e > now {
 			expireAny = earlier(expireAny, e)
 		}
-		limit := int64(p.EntitlementBaseInfo.Quota.CreditsLimit)
+		var limit float64
+		var used float64
+		if u.Unit == UnitUSD {
+			limit = p.EntitlementBaseInfo.Quota.BasicUsageLimit
+			used = p.Usage.BasicUsageAmount
+			if limit <= 0 {
+				continue
+			}
+			// 美元口径保留小数，不截断（实测 $0.00059 这种量级，取整会全变 0）。
+			u.LimitUSD += limit
+			u.UsedUSD += used
+			if e > now {
+				expireQuota = earlier(expireQuota, e)
+			}
+			continue
+		}
+		limit = p.EntitlementBaseInfo.Quota.CreditsLimit
 		if limit <= 0 {
 			continue
 		}
-		remain += limit - int64(p.Usage.CreditsAmount)
-		total += limit // 面板「积分」列显示 剩余/总额
+		l := int64(limit)
+		u.Remain += l - int64(p.Usage.CreditsAmount)
+		u.Total += l
 		if e > now {
-			expireCredit = earlier(expireCredit, e)
+			expireQuota = earlier(expireQuota, e)
 		}
 	}
-	if expireCredit > 0 {
-		return remain, total, expireCredit, nil
+	if expireQuota > 0 {
+		u.Expire = expireQuota
+	} else {
+		u.Expire = expireAny
 	}
-	return remain, total, expireAny, nil
+	return u, nil
+}
+
+// UserEntUsage 返回剩余积分、积分总额与最早的积分到期时间（积分口径的老接口，行为不变）。
+//
+// 国际版是美元计费、积分恒 0，走这个接口拿不到任何有用数字——需要国际版口径请用
+// UserEntUsageDetail（它会返回 Unit=usd 与美元字段）。
+func (c *Client) UserEntUsage(a *auth.Auth) (remain, total, expire int64, err error) {
+	u, err := c.UserEntUsageDetail(a)
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	return u.Remain, u.Total, u.Expire, nil
 }
 
 // earlier 取两个时刻里更早的非零值（0 = 未知）。
@@ -1049,49 +1212,80 @@ func earlier(cur, v int64) int64 {
 	return cur
 }
 
-// CreditPackage 单个积分包的构成明细（面板「积分构成」用）。
+// CreditPackage 单个额度包的构成明细（面板「积分构成 / 额度构成」用）。
 //
-// 上游 ide_user_ent_usage 的 user_entitlement_pack_list 每条即一个包（实测 5 条：
+// 上游 ide_user_ent_usage 的 user_entitlement_pack_list 每条即一个包（国内实测 13 条：
 // 老用户福利 / 免费 / 每月登录赠送 / 每日签到…）。只看聚合值看不出「余额为什么差
-// 这么多」，差别藏在包的面额（credits_limit）与到期时间（expire_time）里。
+// 这么多」，差别藏在包的面额与到期时间里。
+//
+// 两地区币种不同（见 entUsagePack 的实测说明），所以带上 Unit：
+// 积分口径填 Remain/Used/Size，美元口径填 RemainUSD/UsedUSD/SizeUSD。
+// **不要**把两边数字相加或比较——单位不可换算。
 type CreditPackage struct {
-	Name string `json:"name"` // display_desc（老用户福利 / 每月登录赠送 / 签到奖励）
+	Name string `json:"name"` // display_desc（老用户福利 / 每月登录赠送 / 签到奖励 / Free plan）
 	// Group 分组名（用户福利 / 每月登录积分 / 每日签到），display_desc 缺失时的兜底展示名。
 	Group     string  `json:"group,omitempty"`
 	GroupType int     `json:"group_type,omitempty"`
-	Remain    int64   `json:"remain"` // credits_limit - credits_amount
+	Unit      string  `json:"unit"`   // UnitCredit | UnitUSD
+	Remain    int64   `json:"remain"` // credits_limit - credits_amount（Unit=credit）
 	Used      int64   `json:"used"`
-	Size      int64   `json:"size"`             // credits_limit
+	Size      int64   `json:"size"` // credits_limit
+	// 美元口径（Unit=usd）。实测 Free plan：limit=1、used=0.00059 —— 走 int64 会全是 0。
+	RemainUSD float64 `json:"remain_usd,omitempty"`
+	UsedUSD   float64 `json:"used_usd,omitempty"`
+	SizeUSD   float64 `json:"limit_usd,omitempty"`
 	Expire    int64   `json:"expire,omitempty"` // 到期时间（Unix 秒）；0 = 上游没给
 	Start     int64   `json:"start,omitempty"`  // 发放时间（Unix 秒）
 	EntID     string  `json:"ent_id,omitempty"` // entitlement_id 或 source_id，供面板去重/对齐
 	Ratio     float64 `json:"-"`                // 占位：上游的用量比例已在 usage 里，暂不用
 }
 
-// CreditPackages 拉账号当前的逐包构成，并返回各包 remain / size 之和。
-// 只有 credits_limit > 0 的包算积分包（国内「免费」那条是订阅权益、没有面额，跳过）。
-// 国际版走 v1 路径（见 entUsagePath）：付费国际号有面额、免费号只有一条
-// `Free plan`（credits_limit=0）→ 返回空列表 + 0/0，面板据此显示「无积分套餐」，
-// 而不是把国际号整条当成接口不可用。
-func (c *Client) CreditPackages(a *auth.Auth) ([]CreditPackage, int64, int64, error) {
-	req, err := http.NewRequest(http.MethodPost, c.ugBaseFor(a)+entUsagePath(a), bytes.NewReader([]byte(entUsageBody)))
+// BalancePackages 口径感知的逐包构成 + 汇总（美元号也拿得到东西）。
+//
+// 判口径同 UserEntUsageDetail：只看顶层 is_dollar_usage_billing。
+func (c *Client) BalancePackages(a *auth.Auth) ([]CreditPackage, EntUsage, error) {
+	resp, err := c.fetchEntUsage(a)
 	if err != nil {
-		return nil, 0, 0, err
+		return nil, EntUsage{}, err
 	}
-	UgHeaders(req, a)
-	data, err := c.doJSON(req)
-	if err != nil {
-		return nil, 0, 0, err
+	u := EntUsage{Unit: UnitCredit}
+	if resp.IsDollarUsageBill {
+		u.Unit = UnitUSD
 	}
-	var resp struct {
-		UserEntitlementPackList []entUsagePack `json:"user_entitlement_pack_list"`
-	}
-	if err := json.Unmarshal(data, &resp); err != nil {
-		return nil, 0, 0, fmt.Errorf("packages parse: %w", err)
-	}
+	now := time.Now().Unix()
+	var expireQuota, expireAny int64
 	out := make([]CreditPackage, 0, len(resp.UserEntitlementPackList))
-	var sumRemain, sumSize int64
 	for _, p := range resp.UserEntitlementPackList {
+		e := packExpiry(p)
+		if e > now {
+			expireAny = earlier(expireAny, e)
+		}
+		id := p.EntitlementBaseInfo.EntitlementID
+		if id == "" {
+			id = p.SourceID
+		}
+		base := CreditPackage{
+			Name: p.DisplayDesc, Group: p.GroupName, GroupType: p.GroupType,
+			Unit: u.Unit, Expire: e, Start: p.EntitlementBaseInfo.StartTime, EntID: id,
+		}
+		if u.Unit == UnitUSD {
+			limit, used := p.EntitlementBaseInfo.Quota.BasicUsageLimit, p.Usage.BasicUsageAmount
+			if limit <= 0 {
+				continue // 没有面额的包（订阅权益那类）不算额度包
+			}
+			remain := limit - used
+			if remain < 0 {
+				remain = 0
+			}
+			base.RemainUSD, base.UsedUSD, base.SizeUSD = remain, used, limit
+			u.LimitUSD += limit
+			u.UsedUSD += used
+			if e > now {
+				expireQuota = earlier(expireQuota, e)
+			}
+			out = append(out, base)
+			continue
+		}
 		limit := int64(p.EntitlementBaseInfo.Quota.CreditsLimit)
 		if limit <= 0 {
 			continue
@@ -1101,25 +1295,37 @@ func (c *Client) CreditPackages(a *auth.Auth) ([]CreditPackage, int64, int64, er
 		if remain < 0 {
 			remain = 0
 		}
-		id := p.EntitlementBaseInfo.EntitlementID
-		if id == "" {
-			id = p.SourceID
+		base.Remain, base.Used, base.Size = remain, used, limit
+		u.Remain += remain
+		u.Total += limit
+		if e > now {
+			expireQuota = earlier(expireQuota, e)
 		}
-		out = append(out, CreditPackage{
-			Name:      p.DisplayDesc,
-			Group:     p.GroupName,
-			GroupType: p.GroupType,
-			Remain:    remain,
-			Used:      used,
-			Size:      limit,
-			Expire:    packExpiry(p),
-			Start:     p.EntitlementBaseInfo.StartTime,
-			EntID:     id,
-		})
-		sumRemain += remain
-		sumSize += limit
+		out = append(out, base)
 	}
-	return out, sumRemain, sumSize, nil
+	if expireQuota > 0 {
+		u.Expire = expireQuota
+	} else {
+		u.Expire = expireAny
+	}
+	return out, u, nil
+}
+
+// CreditPackages 积分口径的老接口（行为不变）：只收 credits_limit>0 的包。
+// 国际版免费号（credits_limit=0）返回空列表 + 0/0 —— 需要国际版口径请用 BalancePackages。
+func (c *Client) CreditPackages(a *auth.Auth) ([]CreditPackage, int64, int64, error) {
+	packs, u, err := c.BalancePackages(a)
+	if err != nil {
+		return nil, 0, 0, err
+	}
+	out := make([]CreditPackage, 0, len(packs))
+	for _, p := range packs {
+		if p.Unit != UnitCredit {
+			continue
+		}
+		out = append(out, p)
+	}
+	return out, u.Remain, u.Total, nil
 }
 
 // SetTimeouts 更新超时三元组：短 RPC 总时长 / 聊天首字节 / 聊天流内空闲。

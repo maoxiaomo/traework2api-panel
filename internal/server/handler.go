@@ -32,6 +32,13 @@ type Config struct {
 	DefaultModel string          // 默认 glm-5.2
 	PromptMode   string          // passthrough / custom / append
 	PromptText   string          // custom/append 用的提示词文本
+	// MaxFunction 开启 Max 上下文时把出站 function 换到哪个面（默认 chat_v3）。
+	//
+	// 为什么必须换面：Max 变体只在部分上游面上**声明**了更大的窗口。2026-10-15 全表实测
+	// （782 条明细）——solo_work_lite（本面板默认面）12 个 __max 条目、0 个窗口更大；
+	// solo_coder 36 个、0 个；而 chat_v3 20 个里 20 个更大（116k→1000k）。
+	// 换面不影响可调用性（本仓 2026-10-04 已实测 function 不是约束：4 模型 × 4 轴 16/16 全 200）。
+	MaxFunction string
 	Session      *session.Router // 可选，会话粘性（同一会话粘同一账号）
 	Panel        http.Handler    // 可选，/panel/
 	Usage        *usage.Recorder // 可选，逐请求用量台账（按 账号×模型×时间片 分桶）
@@ -117,9 +124,14 @@ type Runtime struct {
 	DefaultModel string
 	PromptMode   string
 	PromptText   string
+	// MaxFunction 空 = 用 DefaultMaxFunction（chat_v3）。
+	MaxFunction string
 	// APIKey 空 = 不鉴权。整份 Runtime 一起套用，所以"面板里把密钥清空"也能立即生效。
 	APIKey string
 }
+
+// DefaultMaxFunction 未配置时用哪个面上发 Max（客户端自己的主对话面）。
+const DefaultMaxFunction = "chat_v3"
 
 // ApplyRuntime 立即改默认模型、出站提示词改写与 API 密钥（面板保存配置时调用）。
 func (h *Handler) ApplyRuntime(rt Runtime) {
@@ -129,6 +141,7 @@ func (h *Handler) ApplyRuntime(rt Runtime) {
 		h.cfg.DefaultModel = rt.DefaultModel
 	}
 	h.cfg.PromptMode, h.cfg.PromptText = rt.PromptMode, rt.PromptText
+	h.cfg.MaxFunction = rt.MaxFunction
 	h.cfg.APIKey = rt.APIKey
 }
 
@@ -139,8 +152,17 @@ func (h *Handler) runtime() Runtime {
 		DefaultModel: h.cfg.DefaultModel,
 		PromptMode:   h.cfg.PromptMode,
 		PromptText:   h.cfg.PromptText,
+		MaxFunction:  h.cfg.MaxFunction,
 		APIKey:       h.cfg.APIKey,
 	}
+}
+
+// maxFunction 出站 Max 用哪个面；没配就是 chat_v3。
+func (h *Handler) maxFunction() string {
+	if fn := strings.TrimSpace(h.runtime().MaxFunction); fn != "" {
+		return fn
+	}
+	return DefaultMaxFunction
 }
 
 // applyPrompt 出站前按模式改写系统提示词；passthrough（默认）原样返回。
@@ -294,8 +316,11 @@ var dynamicModelsCache struct {
 	pickOnlyByModel map[string]bool
 	// fnByModel 模型 → 所属通道（solo_work_lite / solo_coder）：出站 function 跟着模型走。
 	fnByModel map[string]string
-	fetched   time.Time
-	lastFail  time.Time
+	// maxVariantByModel 模型 → 上游给的 __max 变体名（**只在真有更大窗口时才登记**）。
+	// 键是裸 config_name，值形如 "glm-5.2__max"（原样取自上游表，不拼）。
+	maxVariantByModel map[string]string
+	fetched           time.Time
+	lastFail          time.Time
 }
 
 const (
@@ -356,6 +381,13 @@ func (h *Handler) modelList() []map[string]any {
 			if mi.ContextMax > 0 {
 				entry["context_length_max"] = mi.ContextMax
 			}
+			// Max 可用性（网关客户端据此决定要不要发 max_context / __max 后缀）。
+			// 只有上游真给了更大的窗口才报 true —— solo_work_lite 那 12 个「有 __max 名、
+			// 窗口没变大」的条目报 false，否则客户端开了也不增长，属于骗人。
+			if mi.MaxAvailable() {
+				entry["max_available"] = true
+				entry["max_model"] = mi.MaxModelName
+			}
 			if mi.Rate != nil {
 				entry["credit_rate"] = *mi.Rate
 			}
@@ -393,6 +425,7 @@ func (h *Handler) fetchDynamicModels() []upstream.ModelInfo {
 	realmByModel := map[string]string{}
 	fnByModel := map[string]string{}
 	pickOnlyByModel := map[string]bool{}
+	maxVariantByModel := map[string]string{}
 	seen := map[string]bool{}
 	for _, acct := range h.realmReps() {
 		realm := acct.Realm()
@@ -413,6 +446,11 @@ func (h *Handler) fetchDynamicModels() []upstream.ModelInfo {
 			if mi.PickOnly {
 				pickOnlyByModel[mi.ID] = true
 			}
+			// 只登记「真有更大窗口」的：max_available=false 的模型进不了这张表，
+			// 客户端就算发了 max_context 也只会被如实忽略（不会发一个上游认不出的名字）。
+			if mi.MaxAvailable() {
+				maxVariantByModel[mi.ID] = mi.MaxModelName
+			}
 		}
 	}
 	if len(merged) == 0 {
@@ -426,6 +464,7 @@ func (h *Handler) fetchDynamicModels() []upstream.ModelInfo {
 	dynamicModelsCache.realmByModel = realmByModel
 	dynamicModelsCache.fnByModel = fnByModel
 	dynamicModelsCache.pickOnlyByModel = pickOnlyByModel
+	dynamicModelsCache.maxVariantByModel = maxVariantByModel
 	dynamicModelsCache.fetched = time.Now()
 	dynamicModelsCache.lastFail = time.Time{}
 	dynamicModelsCache.Unlock()
@@ -452,6 +491,37 @@ func (h *Handler) modelFunction(model string) string {
 	dynamicModelsCache.RLock()
 	defer dynamicModelsCache.RUnlock()
 	return dynamicModelsCache.fnByModel[model]
+}
+
+// modelMaxVariant 该模型的 Max 变体名（形如 "glm-5.2__max"）；没有更大窗口时返回空。
+//
+// 返回的是**上游表里的原值**，不是拼出来的——全表 417 条变体名里 99 条不满足 ID+后缀
+// （见 upstream.variantNames 的实测说明）。取不到就是空，调用方按「该模型没有 Max」处理。
+func (h *Handler) modelMaxVariant(model string) string {
+	dynamicModelsCache.RLock()
+	defer dynamicModelsCache.RUnlock()
+	return dynamicModelsCache.maxVariantByModel[model]
+}
+
+// setModelNameInBody 只换出站 model（变体名），config_name 保持裸名不动。
+//
+// 2026-10-15 实测：body{config_name:"glm-5.2", model:"glm-5.2__dev"|"glm-5.2__max"}
+// 在 solo_work_lite / chat_v3 / solo_agent 三个面上都是 200 + 正文 + usage，
+// 也就是说「变体住 model、slot 名住 config_name」这个形状上游认。
+func setModelNameInBody(body []byte, modelName string) []byte {
+	if strings.TrimSpace(modelName) == "" {
+		return body
+	}
+	var obj map[string]any
+	if err := json.Unmarshal(body, &obj); err != nil {
+		return body
+	}
+	obj["model"] = modelName
+	out, err := json.Marshal(obj)
+	if err != nil {
+		return body
+	}
+	return out
 }
 
 // setFunctionInBody 把出站 function 换成该模型所属通道（PrepareBody 不覆盖显式 function）。
@@ -533,6 +603,9 @@ func setSlotInBody(body []byte, r upstream.SlotRoute) []byte {
 type chatRequest struct {
 	Stream bool   `json:"stream"`
 	Model  string `json:"model"`
+	// MaxContext 网关侧显式开 Max 上下文（客户端原生写法是在模型名后加 __max，
+	// 两种等价，见 chatCompletions 里的判定）。未知字段，OpenAI 客户端会忽略。
+	MaxContext bool `json:"max_context"`
 }
 
 func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
@@ -564,6 +637,11 @@ func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
 	// 会话键必须在改写提示词之前取：改写会动 messages，之后取会让键漂移。
 	sessKey := session.ExtractKey(body)
 
+	// Max 上下文判定必须在 mapModel 之前：mapModel 会把 __max 后缀剥掉（那是内部名），
+	// 剥完就再也看不出客户端要的是 Max 档。两种等价写法都认。
+	maxOn := peek.MaxContext ||
+		strings.HasSuffix(strings.ToLower(strings.TrimSpace(bareModel)), "__max")
+
 	configName, err := h.mapModel(bareModel, realm)
 	if err != nil {
 		writeOpenAIError(w, http.StatusBadRequest, "invalid_request", err.Error())
@@ -592,6 +670,23 @@ func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
 	// solo_coder 通道，发在 Work 通道会被判 4001。
 	if fn := h.modelFunction(configName); fn != "" {
 		body = setFunctionInBody(body, fn)
+	}
+	// Max 上下文：两种开法等价——模型名后缀 __max（客户端原生写法，mapModel 会把后缀
+	// 剥掉，所以判定必须在剥之前用 bareModel）或请求体 max_context:true。
+	//
+	// 没有更大窗口的模型**如实忽略**并留日志，不报错也不硬发：上游表里 solo_work_lite
+	// 面有 12 个条目带 __max 名却与 dev 同窗口，发了等于没发，报错又会让客户端白挂。
+	if maxOn {
+		if v := h.modelMaxVariant(configName); v != "" {
+			body = setModelNameInBody(body, v)
+			// Max 只在部分面上被声明（chat_v3 20/20 更大；solo_work_lite 0/12）。
+			// 面上换到哪儿由 max_function 配，默认 chat_v3。function 不是可调用性约束
+			// （本仓 2026-10-04 实测 4 模型 × 4 轴 16/16 全 200），只影响窗口声明。
+			body = setFunctionInBody(body, h.maxFunction())
+			log.Printf("[max] uid入站模型=%s 出站 model=%s function=%s", configName, v, h.maxFunction())
+		} else {
+			log.Printf("WARN: [max] %s 没有更大的 Max 窗口（上游表无 __max 或与 dev 同窗口），本请求按默认档发出", configName)
+		}
 	}
 
 	tried := map[string]bool{}
