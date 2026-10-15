@@ -1,7 +1,7 @@
 # traework2api
 
-TRAE Work (SOLO CN) 的 OpenAI 兼容反向代理。把 TRAE SOLO 免费对话通道
-（`llm_utils_chat` + `function=solo_work_lite`）包装成统一服务，支持多账号轮转、自动签到、
+面向 `llm_utils_chat` 对话通道的 OpenAI 兼容反向代理。把上游的
+**`function=solo_work_lite` 通道**（免费对话面）包装成统一服务，支持多账号轮转、自动签到、
 token 自动刷新。入站三种协议：`chat_completions`（`POST /v1/chat/completions`）、
 `codex_responses`（`POST /v1/responses`）、`anthropic_messages`（`POST /v1/messages`，
 同样接受 `POST /messages`）。
@@ -13,7 +13,7 @@ token 自动刷新。入站三种协议：`chat_completions`（`POST /v1/chat/co
 - **三种入站协议**：`POST /v1/chat/completions`（OpenAI chat）、`POST /v1/responses`
   （Codex；`wire_api="chat"` 已在 Codex 0.84+ 移除，只认 Responses）、`POST /v1/messages`
   与 `POST /messages`（Anthropic Messages，含 `x-api-key` 鉴权）；都是先转成 chat 请求再走
-  **同一条链路**（切号、冷却、会话粘性、提示词改写、出站改写），上游仍是 SOLO chat SSE
+  **同一条链路**（切号、冷却、会话粘性、提示词改写、出站改写），上游仍是同一条 chat SSE
 - **`GET /v1/models`**：模型列表
 - **多账号池**：积分加权挑选（闲置补偿 + 快过期优先），在途限额，熔断/降权/计划冷却，
   401 连续 3 次才禁用（一次抖动不杀号），请求级轮转
@@ -26,7 +26,7 @@ token 自动刷新。入站三种协议：`chat_completions`（`POST /v1/chat/co
 - **会话粘性**：同一会话的多轮请求粘同一账号（命中上游 prompt 缓存）
 - **调用用量台账**：按「时间片 × 账号 × 模型」记请求数/失败数/token/延迟，面板可查
 - **系统提示词改写**：passthrough / custom / append 三态，出站前替换或追加
-- **登录闭环**：`login.sh` 自生成登录链接 → 浏览器登录 → 粘贴回调链接 → 换 token 落盘（面板「添加账号」同一流程，TRAE 只认它自己的本机回调，见下）
+- **登录闭环**：`login.sh` 自生成登录链接 → 浏览器登录 → 粘贴回调链接 → 换 token 落盘（面板「添加账号」同一流程，客户端只认它自己的本机回调，见下）
 
 ## 快速开始（Docker）
 
@@ -65,7 +65,7 @@ curl http://127.0.0.1:7864/v1/messages \
 
 ## 登录流程
 
-TRAE 登录页强制回调 `127.0.0.1`，但浏览器与服务器不需要同机：
+登录页强制回调 `127.0.0.1`，但浏览器与服务器不需要同机：
 `login.sh` 自生成登录链接，登录成功后你把地址栏回调链接粘回去即可。
 （同一件事在面板里也能做：点「登录账号」→ 粘贴回调 → 换票落盘，见「管理面板」。）
 
@@ -84,10 +84,10 @@ TRAE 登录页强制回调 `127.0.0.1`，但浏览器与服务器不需要同机
 
 **`ClientID` 与账号强绑定，别改**（2026-10-15 实测）：`refresh token` 是**按 `ClientID` 铸**的，
 换票时两者必须同档，跨档一律 `10101 无效参数`（2×2 全交叉矩阵在两个 host 上、正序倒序各跑一遍，
-结果一致；`BoundDeviceID` 也分档）。本仓所有账号都是 `en1oxy7wnw8j9n`（SOLO 档）铸的，
+结果一致；`BoundDeviceID` 也分档）。本仓所有账号都是**对话档** `en1oxy7wnw8j9n` 铸的，
 所以 `upstream.ClientID` / `login.sh` 的 `CLIENT_ID` / 登录页 `client_id` **三处必须保持一致**，
 任意一处漂到 IDE 档的 `ono9krqynydwx5` 都会让**全部已有账号**换票失败。
-该档位本身健在：`GetPCAuthCode` 用 SOLO 档与 IDE 档都返回 200，只有伪造的 client_id 才
+该档位本身健在：`GetPCAuthCode` 用对话档与 IDE 档都返回 200，只有伪造的 client_id 才
 `400 Invalid client.`（对照有区分力）。
 
 ## 本机运行（非 Docker）
@@ -123,7 +123,7 @@ go build -o tw2api ./cmd/server
 里 `api_key` 是随机 `sk-…`（默认监听 `0.0.0.0`，空 key 等于裸暴露），启动日志会打印一次。
 **已存在的配置不会被改写**（`O_EXCL`），老配置里空着就继续空着，改文件或在面板里填都行。
 
-**与 workbuddy2api 的配置面差异**（有差异的地方都是"trae 上游没有这个能力"）：
+**与 workbuddy2api 的配置面差异**（有差异的地方都是"上游没有这个能力"）：
 `schedule.travel/activity/blackcat_*`（活动任务）、`global`（国际域路由）、`upstash`
 （共享状态）、`features.sanitize_blacklist_fingerprints`、`pool.max_in_flight_global`、
 `pool.cost_explore_interval`（成本分层探索）、`upstream.device_token*/cli_version` 未提供——
@@ -158,7 +158,7 @@ git tag "v$VERSION" && git push origin "v$VERSION"
 ```
 
 **积分口径**：池与面板的「剩余/总额」都来自 `ide_user_ent_usage`（`user_entitlement_pack_list[]` 里
-`quota.credits_limit>0` 的包求和，`usage.credits_amount` 为已用）。这条通路上**没有**独立的 SOLO 额度字段：
+`quota.credits_limit>0` 的包求和，`usage.credits_amount` 为已用）。这条通路上**没有**独立的对话额度字段：
 2026-10-11 抓整条对话流实测，事件只有 `done / extra_info / metadata / output / timing_cost / token_usage`，
 没有第三方笔记记的 `notify_usage`，整条流里 credit/billing/quota/remain 字段 0 条 —— 复跑
 `TW2A_PROBE_CHAT=1 go test ./internal/upstream -run TestProbeLiveBilling -v`。
@@ -317,7 +317,7 @@ session 失效（上游 `1001` / `20101`，refresh token 也救不回来）**连
 管线，所以切号/冷却/会话粘性/台账对三条路一样生效。`codex_responses` 不保存
 `previous_response_id` / `store`（Codex 每轮自带全量 input）；`anthropic_messages` 不回传
 thinking（上游没有 signature）。缓存命中各按客户端口径回：responses 出
-`input_tokens_details.cached_tokens`，messages 出 `cache_read_input_tokens`（都取自 SOLO
+`input_tokens_details.cached_tokens`，messages 出 `cache_read_input_tokens`（都取自上游
 `usage.cache_read_input_tokens`，没有就不写，不拿 0 冒充"没命中"）。
 客户端自己带的 `reasoning_effort` 之类字段是**原样透传**上游的，不认的也一个不吞（`PrepareBody` 只改
 `stream`/`function`/`config_name`/`model`/`tools`）。
@@ -404,7 +404,7 @@ Spearman 相关系数（真按档位调档应该接近 `+1`）。14 个会思考
   `deepseek-v4.1-flash`，少掉 `glm-5` / `DeepSeek-V4-Flash` / `DeepSeek-V4-Pro`（后三个在新版客户端里
   已 `is_invisible_to_user`）。可见集合本身还会随灰度漂移（同一版本码下 `qwen*` 时有时无），
   所以**动态拉取才是权威**，静态表只是拉不到时的兜底快照。
-- **官方版本号在更新日志里**：`https://docs.trae.cn/work_changelog`（TraeWork 最新 `v0.1.52`，
+- **官方版本号在更新日志里**：`https://docs.trae.cn/work_changelog`（客户端最新 `v0.1.52`，
   2026-08-21 那批；IDE 侧另见 `ide_changelog`）。客户端自带的更新接口
   `log.snssdk.com/service/2/app_alert_check/` 实测只回 `{"message":"success"}`，取不到版本。
 - **冒充最新版能请求到模型，但没有收益**：用 `0.1.52 / 20260821` 的身份发 `kimi-k3` 拿到
@@ -439,7 +439,7 @@ Spearman 相关系数（真按档位调档应该接近 `+1`）。14 个会思考
 以及粘贴登录回调后立刻写入 `auths/trae-{uid}.json` 并进池，不用重启。
 
 「登录账号」拿到的授权链接里，`auth_callback_url` 恒为 `http://127.0.0.1:18080/authorize`，**写死不做配置项**：
-实测 TRAE 只认它自己 IDE 的这一条，换任何别的地址（面板自己的路径、别的端口、公网隧道域名）授权页
+实测该客户端只认它自己 IDE 的这一条，换任何别的地址（面板自己的路径、别的端口、公网隧道域名）授权页
 直接「登录失败 / 网络错误，请刷新页面重试」，登录都进行不下去。所以回跳必然落在浏览器那台机器的
 `127.0.0.1:18080` 上（那里没人监听，页面打不开是正常的），只能把地址栏整段粘回面板换票。
 想免粘贴就得在**浏览器那台机器**上跑个监听 18080 的本机中继（面板在服务器上时它够不着服务器的回环地址）。
@@ -452,7 +452,7 @@ Spearman 相关系数（真按档位调档应该接近 `+1`）。14 个会思考
 平均延迟与吐字速率，可按模型、按账号、按时序下钻。失败尝试也计入请求数——重试放大正是
 靠这一列才看得见。数据落在 `data/usage.json`（与 `state_file` 同目录，30 秒防抖落盘）。
 
-## 国际版（Trae 国际 / TRAE SOLO 国际）
+## 国际版（国际区 / intl）
 
 国内版与国际版是**同一套 API 的两套域 + 两套身份版本组**，所以入站协议、SSE 事件、`function=solo_work_lite`
 全都不变，只有域和版本号不同（实测 2026-09-28，见下表）。账号按 `auth.domain` 自动分地区（`auth.Realm()`），
@@ -547,9 +547,9 @@ claude 系列）在这台账号上全回 `4023`，是租户没配那些 provider
 
 | 网页端名字 | 内部模型 / 通道 | 状态 |
 |---|---|---|
-| TraeWork Auto Model | `auto` → 该地区旗舰（国际 `gpt-5.2`） | 可用 |
-| GPT-6-Sol · GPT-6-Luna | `gpt-6-sol` / `gpt-6-luna`（Work 通道，走槽位旁路） | 可用 |
-| GPT-5.4 · GPT-5.2 · Kimi-K3 | 同名，Work 通道（`solo_work_lite`） | 可用 |
+| Auto Model | `auto` → 该地区旗舰（国际 `gpt-5.2`） | 可用 |
+| GPT-6-Sol · GPT-6-Luna | `gpt-6-sol` / `gpt-6-luna`（工作通道，走槽位旁路） | 可用 |
+| GPT-5.4 · GPT-5.2 · Kimi-K3 | 同名，工作通道（`solo_work_lite`） | 可用 |
 | Gemini-3.1-Pro-Preview | `gemini-3.1-pro`，**coder 通道**（`solo_coder`） | 通道已接；本账号受上游速率/额度限制，忙时报 4011 |
 | Gemini-3-Flash-Preview | `gemini-3-flash-solo`，coder 通道 | 同上 |
 | MiniMax-M2.7 | `minimax-m2.7`，coder 通道 | 同上 |
@@ -584,7 +584,7 @@ cmd/server/       HTTP 服务（config + main）
 cmd/signin/       批量签到工具
 cmd/credit/       积分查询工具
 internal/auth/    auth 文件解析/原子写回
-internal/upstream/ SOLO 上游客户端 + SSE 转换
+internal/upstream/ 上游客户端 + SSE 转换
 internal/pool/    账号池（冷却/禁用/积分）
 internal/scheduler/ 定时签到 + token 保活
 internal/server/  三种入站协议（chat / responses / messages）+ 共用请求链路
