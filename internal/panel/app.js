@@ -180,7 +180,10 @@ function credTitle(a) {
       '。上游 is_dollar_usage_billing=true，积分字段（credits_limit）恒 0，' +
       '所以这一列不能按积分读——免费号是 $1 免费额度，不是无限。';
   }
-  if (a && a.credits_total) return '剩余 / 总额（上游积分包）';
+  // 国际号还没取到美元数时同理：别提积分——0 会被读成「没额度 / 无限量」。
+  if (a && a.realm === 'intl') {
+    return '国际版按美元计量：点「刷新」取一次剩余额度（上游积分字段恒 0，不是无限量）。';
+  }
   return '剩余 / 总额（上游积分包）';
 }
 // credCell 额度列单元格。
@@ -197,6 +200,12 @@ function credCell(a) {
       (limit > 0 ? '<span class="tot">/' + esc(fmtUSD(limit)) + '</span>' : '') + '</div>' +
       '<div class="note">已用 ' + esc(fmtUSD(used)) +
       (pct == null ? '' : ' · 剩 ' + pct.toFixed(1) + '%') + '</div>';
+  }
+  // 国际版一律按美元计量：还没取到美元数时显示「—」，不退回积分分支的 0——
+  // 0 会被读成「没额度 / 无限量」，这正是国际版最容易看错的地方。
+  if (a.realm === 'intl') {
+    return '<div class="n" style="color:var(--ink-3)">—</div>' +
+      '<div class="note">待刷新（美元额度）</div>';
   }
   return '<div class="n">' + (a.credits || 0) +
     (a.credits_total ? '<span class="tot">/' + a.credits_total + '</span>' : '') + '</div>';

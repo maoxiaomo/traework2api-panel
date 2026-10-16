@@ -36,6 +36,7 @@ const assert = require('assert');
 		extractJSFunc(t, src, "isUSD") + "\n" +
 		extractJSFunc(t, src, "fmtUSD") + "\n" +
 		extractJSFunc(t, src, "usdRemain") + "\n" +
+		extractJSFunc(t, src, "credTitle") + "\n" +
 		extractJSFunc(t, src, "credCell") + `
 // ① 美元金额：小数点后 5 位是真实存在的量级（实测已用 $0.00059）
 assert.strictEqual(fmtUSD(1), '$1.00', '整美元要带两位小数，别显示成裸 1');
@@ -72,6 +73,17 @@ for (const v of [undefined, null, 'abc', NaN, {}, { credit_unit: 'usd' }]) {
   const s = credCell(v);
   assert.ok(!/NaN|undefined|Infinity/.test(s), '坏渲染: ' + JSON.stringify(v) + ' → ' + s);
 }
+
+// ⑥ 国际号还没取到美元数（刷新前/新导入）：不许退回积分口径的裸 0——0 会被读成「无限量」。
+//    列头叫「额度」，所以这一格要么是美元额度，要么是「—待刷新」。
+const intlNoData = { realm: 'intl', credits: 0 };
+const intlNoDataCell = credCell(intlNoData);
+assert.ok(!/>0<\//.test(intlNoDataCell), '国际号没取到美元数时不许显示裸 0: ' + intlNoDataCell);
+assert.ok(intlNoDataCell.includes('待刷新'), '国际号没取到美元数要提示待刷新: ' + intlNoDataCell);
+assert.ok(!intlNoDataCell.includes('$'), '没有美元数时不许编出金额: ' + intlNoDataCell);
+assert.ok(!/积分/.test(intlNoDataCell), '国际号的格子不许出现「积分」: ' + intlNoDataCell);
+assert.ok(/额度/.test(credTitle(intlNoData)) && /不是无限量/.test(credTitle(intlNoData)),
+  '国际号提示要说清「额度」并且别让人读成无限量: ' + credTitle(intlNoData));
 `
 	out, err := exec.Command(node, "-e", driver).CombinedOutput()
 	if err != nil {
@@ -113,5 +125,23 @@ func TestPackagesSummaryIsUnitAware(t *testing.T) {
 	}
 	if !strings.Contains(toggle, "btn.dataset.unit === 'usd' ? fmtUSD : fmtTok") {
 		t.Error("分组按钮的重排没按 data-unit 选格式化函数")
+	}
+}
+
+// TestAccountsColumnHeaderSaysQuota 账号表列头必须是「额度」。
+//
+// 国际版那一格是**美元额度**（积分字段恒 0），列头写「积分」时那个 0 会被读成
+// 「没额度 / 无限量」——用户就是这么读错的。列头叫额度，两种口径都成立。
+func TestAccountsColumnHeaderSaysQuota(t *testing.T) {
+	raw, err := os.ReadFile("index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(raw)
+	if !strings.Contains(src, "<th>额度</th>") {
+		t.Error("账号表列头里找不到 <th>额度</th> —— 国际版那一列要按额度显示")
+	}
+	if strings.Contains(src, "<th>积分</th>") {
+		t.Error("账号表列头还写着 <th>积分</th> —— 国际号的 0 会被读成无限量")
 	}
 }
