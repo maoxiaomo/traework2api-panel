@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"traework2api/internal/auth"
 )
@@ -183,8 +184,16 @@ func TestIntlFixtureUnreadableAsCredits(t *testing.T) {
 		t.Errorf("包接口的汇总与明细不一致: limit=%v used=%v", pu.LimitUSD, pu.UsedUSD)
 	}
 	// 到期时间两口径都要有（国际版 expire_time=0，靠 end_time 回落）
-	if u.Expire != 1793491199 || p.Expire != 1793491199 {
-		t.Errorf("国际版到期应回落 end_time=1793491199，实得 u=%d p=%d", u.Expire, p.Expire)
+	// end_time 是夹具里的 2026-10-31：到期的包不该再报到期时间（实现带 `e > now` 门槛），
+	// 所以这里按「已过期就不报」判——把期望值钉死在那个日期上，2026-11-01 起这条断言会自己变红。
+	wantExpire := int64(0)
+	const fixtureEnd = 1793491199
+	if fixtureEnd > time.Now().Unix() {
+		wantExpire = fixtureEnd
+	}
+	if u.Expire != wantExpire || p.Expire != wantExpire {
+		t.Errorf("国际版到期应回落 end_time=%d（未过期）/ 0（已过期），实得 u=%d p=%d",
+			wantExpire, u.Expire, p.Expire)
 	}
 }
 
