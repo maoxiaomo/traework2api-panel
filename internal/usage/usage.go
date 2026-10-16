@@ -279,6 +279,13 @@ func (r *Recorder) load() error {
 	}
 	var f file
 	if err := json.Unmarshal(raw, &f); err != nil {
+		// 坏了就从零开始，但先把坏文件挪到一边：直接落盘会把它覆盖成空，
+		// 那是唯一能追查「为什么坏」的东西（留一份 .corrupt）。
+		if rerr := os.Rename(r.path, r.path+".corrupt"); rerr != nil {
+			log.Printf("[usage] 坏台账备份失败: %v", rerr)
+		} else {
+			log.Printf("[usage] 台账解析失败，坏文件已备份为 %s.corrupt", r.path)
+		}
 		return err
 	}
 	for i := range f.Buckets {
@@ -311,7 +318,6 @@ func (r *Recorder) flush(force bool) {
 	for _, b := range r.buckets {
 		snap.Buckets = append(snap.Buckets, *b)
 	}
-	r.dirty = false
 
 	raw, err := json.Marshal(snap)
 	if err != nil {
@@ -329,7 +335,11 @@ func (r *Recorder) flush(force bool) {
 	}
 	if err := os.Rename(tmp, r.path); err != nil {
 		log.Printf("[usage] 原子替换失败: %v", err)
+		return
 	}
+	// 只有真写成了才清 dirty：先清的话，落盘失败后台 ticker 看到 dirty=false 就不再重试，
+	// 台账只剩内存里的那份，空闲期掉电/被 kill 就丢量。
+	r.dirty = false
 }
 
 // Save 立即落盘（面板「刷新」或关闭前调用）。

@@ -54,6 +54,9 @@ func responsesToChat(src []byte) ([]byte, *responsesMeta, error) {
 		"model", "stream", "tool_choice", "max_tokens", "max_output_tokens",
 		"max_completion_tokens", "temperature", "top_p", "user", "n", "stop",
 		"metadata", "stream_options", "parallel_tool_calls",
+		// Max 档：与 /v1/chat/completions 同一语义（出站换 __max 变体 + Max 面）。
+		// 不进白名单就会被静默丢掉，客户端以为开了大窗口、实际拿的是 dev 档。
+		"max_context",
 		// ponytail: Codex 客户端按会话发 prompt_cache_key；丢掉就只能靠内容派生会话键。
 		"prompt_cache_key",
 	} {
@@ -922,7 +925,10 @@ func (w *responsesWriter) finish() {
 			}
 			return
 		}
-		_ = w.emitJSONErrorAsFailed()
+		// 请求要流式、拿回来的却不是 SSE（Content-Type 是 JSON）= 上游/网关在**首字节之前**
+		// 就回了错误 JSON。此前一律塞进一条 200 的 SSE error 帧，客户端把 200 读成成功、请求
+		// 记录也记成 success；按真实状态码回 JSON 才是实情。
+		w.flushJSON()
 		return
 	}
 	w.flushJSON()

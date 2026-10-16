@@ -71,7 +71,7 @@ func messagesToChat(src []byte) ([]byte, error) {
 		return nil, err
 	}
 	out := map[string]any{}
-	for _, k := range []string{"model", "stream", "temperature", "top_p", "max_tokens"} {
+	for _, k := range []string{"model", "stream", "temperature", "top_p", "max_tokens", "max_context"} {
 		if v, ok := obj[k]; ok {
 			out[k] = v
 		}

@@ -133,6 +133,10 @@ type Runtime struct {
 // DefaultMaxFunction 未配置时用哪个面上发 Max（客户端自己的主对话面）。
 const DefaultMaxFunction = "chat_v3"
 
+// maxSuffix /v1/models 里 Max 档的公开模型名后缀（<模型>-max）：选了它就等于开 Max。
+// 上游内部的 __max 变体名不外发（那两个是不同层的东西，混用会让客户端抄到上游内部名）。
+const maxSuffix = "-max"
+
 // ApplyRuntime 立即改默认模型、出站提示词改写与 API 密钥（面板保存配置时调用）。
 func (h *Handler) ApplyRuntime(rt Runtime) {
 	h.rtMu.Lock()
@@ -399,6 +403,19 @@ func (h *Handler) modelList() []map[string]any {
 				entry["legacy_reason"] = mi.LegacyWhy
 			}
 			out = append(out, entry)
+			// Max 档另列一条 <模型>-max：客户端直接选这个名字就能开大窗口，不必发
+			// max_context —— 那个字段在 /v1/responses 与 /v1/messages 的键白名单里会被
+			// 丢掉（选模型名在三个入站面上都生效）。
+			if mi.MaxAvailable() {
+				twin := make(map[string]any, len(entry)+1)
+				for k, v := range entry {
+					twin[k] = v
+				}
+				twin["id"] = realm + ":" + mi.ID + maxSuffix
+				twin["context_length"] = mi.ContextMax
+				twin["max"] = true
+				out = append(out, twin)
+			}
 		}
 		return out
 	}
@@ -638,9 +655,14 @@ func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
 	sessKey := session.ExtractKey(body)
 
 	// Max 上下文判定必须在 mapModel 之前：mapModel 会把 __max 后缀剥掉（那是内部名），
-	// 剥完就再也看不出客户端要的是 Max 档。两种等价写法都认。
+	// 剥完就再也看不出客户端要的是 Max 档。三种等价写法都认：max_context:true、
+	// 上游内部名后缀 __max、以及 /v1/models 单独列出的公开名 <模型>-max。
+	bareModel = strings.TrimSpace(bareModel)
 	maxOn := peek.MaxContext ||
-		strings.HasSuffix(strings.ToLower(strings.TrimSpace(bareModel)), "__max")
+		strings.HasSuffix(strings.ToLower(bareModel), "__max")
+	if low := strings.ToLower(bareModel); strings.HasSuffix(low, maxSuffix) {
+		bareModel, maxOn = low[:len(low)-len(maxSuffix)], true
+	}
 
 	configName, err := h.mapModel(bareModel, realm)
 	if err != nil {
@@ -701,12 +723,25 @@ func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
 		if tr := traceFrom(r); tr != nil && tr.Account == "" {
 			tr.Account = accountLabel(acct.UID, acct.Nickname)
 		}
-		done, err := h.attempt(w, acct, body, peek, sessKey, traceFrom(r))
-		release()
+		// defer 而不是顺序调用：attempt 内任何 panic（上游客户端、续写器）都会跳过顺序
+		// 调用，把这一号的在途名额永久漏掉；闭包让每个号各 defer 一次。
+		var done bool
+		var err error
+		func() {
+			defer release()
+			done, err = h.attempt(w, acct, body, peek, sessKey, traceFrom(r))
+		}()
 		if done {
 			return
 		}
 		if err != nil {
+			// 调用方参数错（4xx，与账号无关，同 4001/4011 那一类）：如实回上游状态码，
+			// 不再换号——换号只会把每个号都罚一次降权，最后还谎报成「号都不可用」。
+			var ue *upstream.Error
+			if errors.As(err, &ue) && (ue.Kind == upstream.ErrClient || ue.Kind == upstream.ErrNone) {
+				writeOpenAIError(w, ue.Status, "upstream_rejected", ue.Msg)
+				return
+			}
 			lastErr = err
 		}
 	}
@@ -802,7 +837,9 @@ func (h *Handler) attempt(w http.ResponseWriter, acct *auth.Auth, body []byte, p
 		// 续写失败/显式限额/工具分片 → 自动降级为旧行为（截断终态）。
 		cont := upstream.NewContinueReader(h.cfg.Upstream, acct, body, rc)
 		// 流内业务错误（1005 plan/5xx 等）→ 冷却账号，错误信息注入 SSE。
+		streamErr := false
 		usg, serr := upstream.StreamWithError(w, cont, func(se *upstream.SOLOStreamError) {
+			streamErr = true
 			h.handleStreamError(acct.UID, se)
 		})
 		cont.Close()
@@ -814,9 +851,10 @@ func (h *Handler) attempt(w http.ResponseWriter, acct *auth.Auth, body []byte, p
 			h.noteUsage(acct.UID, peek.Model, attemptStart, false, nil, tr)
 			return false, serr
 		}
-		// 流内 error 事件走 onErr 回调后本函数仍返回 nil，所以「有 token_usage」才是这次
-		// 尝试真的产出了回复的判据；只看返回 err 会把 1005 记成成功。
-		ok := serr == nil && len(usg) > 0
+		// 流内 error 事件走 onErr 回调后 serr 仍是 nil，所以成败要看**两处**：返回的 err
+		// 与回调有没有触发过。不看回调会把 1005 记成成功；反过来拿「有没有 token_usage」
+		// 当判据又会把「正文完整但没给 usage」的回复记成失败并解绑会话粘性。
+		ok := serr == nil && !streamErr
 		h.noteUsage(acct.UID, peek.Model, attemptStart, ok, usg, tr)
 		if ok {
 			h.bindSession(sessKey, acct.UID)
@@ -862,6 +900,11 @@ func (h *Handler) attempt(w http.ResponseWriter, acct *auth.Auth, body []byte, p
 func (h *Handler) noteFailure(uid string, kind upstream.ErrKind) {
 	switch kind {
 	case upstream.ErrNone:
+		// no-op
+	case upstream.ErrClient:
+		// 调用方 4xx（参数/未识别的业务码，11101 这类）与账号无关：罚号只会把好号推向
+		// 降权→熔断，而真正该做的是把上游状态码如实回给调用方（见 chatCompletions 的
+		// fail-fast 分支）。
 		// no-op
 	case upstream.ErrPlanLimit:
 		h.cfg.Pool.CooldownPlan(uid)

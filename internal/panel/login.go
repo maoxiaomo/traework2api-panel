@@ -227,8 +227,14 @@ func (p *Panel) completeLogin(id string, cb callbackCreds) (uid, nick string, co
 	}
 	if cb.Refresh != "" {
 		if err := p.cfg.Upstream.RefreshToken(a); err != nil {
-			log.Printf("panel: login exchange failed id=%s", id)
-			return "", "", http.StatusBadGateway, errors.New("换票失败：上游没接受这个 refreshToken")
+			log.Printf("panel: login exchange failed id=%s: %v", id, err)
+			// 换票被拒的真因（10101/20101/20403/20405）已在 upstream 侧翻成人话，透出去让面板说清楚。
+			msg := "换票失败：上游没接受这个 refreshToken"
+			var ue *upstream.Error
+			if errors.As(err, &ue) && ue.Msg != "" {
+				msg += "——" + ue.Msg
+			}
+			return "", "", http.StatusBadGateway, errors.New(msg)
 		}
 	} else if a.AccessToken == "" {
 		return "", "", http.StatusBadRequest, errors.New("回调里没有 refreshToken")

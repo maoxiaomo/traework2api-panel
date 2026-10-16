@@ -10,6 +10,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -100,6 +101,11 @@ func New(cfg Config) *Panel {
 	p.mux.HandleFunc("POST /panel/api/accounts/{uid}/rotate-device", p.withAuth(p.accountRotateDevice))
 	p.mux.HandleFunc("POST /panel/api/accounts/rotate-device-all", p.withAuth(p.rotateDeviceAll))
 	p.mux.HandleFunc("POST /panel/api/accounts/{uid}/remove", p.withAuth(p.accountRemove))
+	// 运维单号动作与批量导入（见 ops.go）。导入端点收「回调链接」或「凭证 JSON」裸文本。
+	p.mux.HandleFunc("POST /panel/api/accounts/{uid}/refresh", p.withAuth(p.accountRefreshToken))
+	p.mux.HandleFunc("GET /panel/api/accounts/{uid}/json", p.withAuth(p.accountCredential))
+	p.mux.HandleFunc("POST /panel/api/accounts/import", p.withAuth(p.accountImport))
+	p.mux.HandleFunc("GET /panel/api/checkin_status", p.withAuth(p.checkinStatus))
 	return p
 }
 
@@ -111,7 +117,17 @@ func (p *Panel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (p *Panel) authorized(r *http.Request) bool {
 	want := p.key()
 	if want == "" {
-		return isLoopback(r)
+		// 空密钥 = 只信本机。写操作再收一道同源：本机浏览器上的任意网页都能发跨站简单
+		// 请求（表单/fetch），RemoteAddr 依旧是回环，只看 IP 等于对它们全放行——实测
+		// 跨站 POST .../remove 会真把凭证删掉。读操作保持原样。
+		if !isLoopback(r) {
+			return false
+		}
+		switch r.Method {
+		case http.MethodGet, http.MethodHead, http.MethodOptions:
+			return true
+		}
+		return sameOrigin(r)
 	}
 	h := r.Header.Get("Authorization")
 	const prefix = "Bearer "
@@ -135,6 +151,28 @@ func (p *Panel) ApplyAPIKey(k string) {
 	p.keyMu.Unlock()
 }
 
+// sameOrigin 写请求是不是面板自己发的：浏览器跨站请求一定带自己的 Origin/Referer，
+// 落不到本机或面板自己的 host 上就拒。非浏览器客户端（curl）不带这两个头，放行。
+func sameOrigin(r *http.Request) bool {
+	ref := r.Header.Get("Origin")
+	if ref == "" {
+		ref = r.Header.Get("Referer")
+	}
+	if ref == "" {
+		return true
+	}
+	u, err := url.Parse(ref)
+	if err != nil {
+		return false
+	}
+	h := u.Hostname()
+	// r.Host 可能带端口、也可能是反代域名：只比主机名部分。
+	if hh, _, err := net.SplitHostPort(r.Host); err == nil {
+		return strings.EqualFold(h, hh)
+	}
+	return strings.EqualFold(h, r.Host)
+}
+
 // isLoopback 请求是否来自本机。见过转发头就直接判否：隧道/反代（Cloudflare、nps、frp）
 // 会把 RemoteAddr 变成 127.0.0.1 并补上转发头，那时「空 key = 仅本机」等于对公众全放行。
 func isLoopback(r *http.Request) bool {
@@ -151,6 +189,8 @@ func isLoopback(r *http.Request) bool {
 
 func (p *Panel) withAuth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		// 面板 API 一律不缓存：/panel/api/config 的响应体里是明文密钥，/overview 里有账号状态。
+		w.Header().Set("Cache-Control", "no-store")
 		if !p.authorized(r) {
 			writeErr(w, http.StatusUnauthorized, "missing or invalid API key")
 			return
@@ -176,6 +216,9 @@ type accountRow struct {
 	// 9074 是设备维度风控，换一个设备号就能脱开旧标记（star620/TraeTools 的做法）。
 	DeviceID   string `json:"device_id,omitempty"`
 	DeviceSeed int64  `json:"device_seed,omitempty"`
+	// TokenExpiresAt access token 到期时刻（Unix 秒）。与 Status.Expire（积分包到期）不是
+	// 一回事：那个是「积分什么时候作废」，这个是「这张票还能用多久」。
+	TokenExpiresAt int64 `json:"token_expires_at,omitempty"`
 }
 
 func (p *Panel) overview(w http.ResponseWriter, r *http.Request) { p.writeOverview(w, nil) }
@@ -203,6 +246,7 @@ func (p *Panel) writeOverview(w http.ResponseWriter, extra map[string]any) {
 		if a := p.cfg.Pool.AuthByUID(st.UID); a != nil {
 			rows[i].DeviceID = upstream.UGDeviceID(a)
 			rows[i].DeviceSeed = a.DeviceSeedValue()
+			rows[i].TokenExpiresAt = a.ExpiresAtValue()
 		}
 	}
 	for _, a := range p.cfg.Usage.Snapshot(usagePanelHours, p.nicks()).ByAccount {
@@ -246,6 +290,10 @@ func (p *Panel) writeOverview(w http.ResponseWriter, extra map[string]any) {
 	}
 	for k, v := range hostInfo {
 		body[k] = v
+	}
+	// 排程现状（下次签到/保活几点）：面板首屏就能看到，不必翻日志猜。
+	if p.cfg.Scheduler != nil {
+		body["schedule"] = p.cfg.Scheduler.Status()
 	}
 	for k, v := range extra {
 		body[k] = v
@@ -756,7 +804,13 @@ func publicErr(err error) string {
 	}
 	var ue *upstream.Error
 	if errors.As(err, &ue) {
-		return fmt.Sprintf("upstream %s http %d", ue.Kind, ue.Status)
+		msg := fmt.Sprintf("upstream %s http %d", ue.Kind, ue.Status)
+		// 带上上游原话/我们翻的处置：没有它，「刷 token 失败」只剩一个状态码，
+		// 运维看不出是「该重登」还是「网络抖动」（换票被拒的四个码就是这么翻出来的）。
+		if ue.Msg != "" {
+			msg += "：" + ue.Msg
+		}
+		return msg
 	}
 	return err.Error()
 }

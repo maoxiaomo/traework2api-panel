@@ -302,7 +302,7 @@ func TestCheckinAllReportsEarnedCredits(t *testing.T) {
 			if claimed.Load() {
 				checked = "true"
 			}
-			_, _ = w.Write([]byte(`{"checked_in":` + checked + `,"credits":150,"extra_credits":50,"enable":true}`))
+			_, _ = w.Write([]byte(`{"checked_in":` + checked + `,"credits":100,"extra_credits":100,"enable":true}`))
 		case strings.HasSuffix(r.URL.Path, "/checkin_credits/claim"):
 			claimed.Store(true)
 			_, _ = w.Write([]byte(`{"code":0,"message":"success"}`))
@@ -334,7 +334,7 @@ func TestCheckinAllReportsEarnedCredits(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(resp.Checkin) != 1 || resp.Checkin[0].Status != "ok" ||
-		resp.Checkin[0].Credits != 200 || resp.Checkin[0].Nickname != "甲" {
+		resp.Checkin[0].Credits != 100 || resp.Checkin[0].Nickname != "甲" {
 		t.Fatalf("回报不对: %+v（body=%s）", resp.Checkin, rec.Body)
 	}
 }

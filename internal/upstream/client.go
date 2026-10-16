@@ -110,17 +110,13 @@ func (e *BusinessError) Error() string {
 // Classify 按 HTTP 状态码 + body 判定错误类别（SPEC §4.3）。
 func Classify(status int, body string) ErrKind {
 	lower := strings.ToLower(body)
-	// 1005 plan 权益不足
-	if strings.Contains(body, `"code":1005`) || (strings.Contains(body, "1005") && strings.Contains(lower, "plan")) {
-		return ErrPlanLimit
-	}
 	// session 失效：401 一律算 session 死。曾经拿 body 标记（login/session/unauthorized…）
 	// 再判一次，但两个分支返回同一个 ErrKind，那段是死代码；是否带标记都不改变结果（TestClassify 两条 401）。
 	if status == http.StatusUnauthorized {
 		return ErrSessionDead
 	}
 	// 传输层的信号优先，别被 body 里的业务码抢走：401/429/404/5xx 说的就是「这次没成」
-	// 的形态（500 里带 quota 文案仍该按服务端故障处理）。
+	// 的形态（500 里带 quota 文案仍该按服务端故障处理）。1005/plan 那类业务码也排在这后面。
 	if status == http.StatusTooManyRequests {
 		return ErrSoftRate
 	}
@@ -130,13 +126,19 @@ func Classify(status int, body string) ErrKind {
 	if status >= 500 {
 		return ErrServer
 	}
+	// 1005 plan 权益不足（业务码，排在传输层之后：429/5xx 的 body 里带 1005 文案时按传输层算，
+	// 否则一次限流会被当成权益不足罚成 12h 硬冷却）。判据取结构化码，不扫文案里的数字：
+	// 111005 那种「数字里含 1005」的未知码会被误判成权益不足。
+	if bodyBusinessCode(body) == 1005 || strings.Contains(body, `"code":1005`) {
+		return ErrPlanLimit
+	}
 	// 业务码胜过「4xx 一律 Client」：同一个码走 HTTP 状态与走 SSE 流内事件是同一套上游
 	// 语义的两种到达方式，落进不同的池状态就会出怪事 —— 4008 走流内是软冷却、走 HTTP 403
-	// 却是降权，就是这么来的。分类表复用流内那张（soloSpecificKind），认不出的业务码不算。
-	if code := bodyBusinessCode(body); code != 0 {
-		if k, ok := soloSpecificKind(int64(code), body); ok {
-			return k
-		}
+	// 却是降权，就是这么来的。分类表复用流内那张（soloSpecificKind），认不出的不算。
+	// 不拿「有没有结构化业务码」当门槛：流内是无条件查表的，这边要求 code != 0 会让同一段
+	// 文案在两条路上分到不同的池动作（取不到码就传 0，让两张表的文字判据对称）。
+	if k, ok := soloSpecificKind(int64(bodyBusinessCode(body)), body); ok {
+		return k
 	}
 	// 调用方侧的「输入过大」：罚号没有意义（同 4026 那条的教训 —— 一个客户端发超长
 	// prompt，重试一圈就把轮转过的每个号都放倒）。上游 413 或几种文案都算。
@@ -245,7 +247,21 @@ func New() *Client {
 	}
 }
 
-func (c *Client) agentBase() string { return c.AgentHost }
+// agentBase 显式配置的 agent 基址（与自动发现字段共用 hostMu：applyUpstream 会热改它）。
+func (c *Client) agentBase() string {
+	c.hostMu.RLock()
+	defer c.hostMu.RUnlock()
+	return c.AgentHost
+}
+
+// SetAgentHosts 热改显式 agent 基址。写侧必须走这里：请求路径在并发读这两个字段
+// （applyUpstream 直接赋值会与读侧构成数据竞争，-race 实测报 DATA RACE）。
+func (c *Client) SetAgentHosts(cn, intl string) {
+	c.hostMu.Lock()
+	c.AgentHost, c.AgentHostIntl = cn, intl
+	c.hostMu.Unlock()
+}
+
 func (c *Client) ugBase() string    { return c.UgHost }
 func (c *Client) oauthBase() string { return c.OAuthHost }
 
@@ -308,6 +324,30 @@ func (c *Client) RefreshTokenIfNeeded(a *auth.Auth, skew time.Duration) (bool, e
 	return true, nil
 }
 
+// exchangeRejectHints 换票被拒的业务码 → 一句能直接给人看的处置。
+//
+// 真因藏在 4xx 响应体的 ResponseMetadata.Error.Code（有用原话在 Data.__Message.error，
+// Message 只是参数模板，形如 `无效参数：{__Message.field}.`）；只抄一句「HTTP 400」等于把
+// 「凭据该重录」说成「网络抖动」，处置完全不同。码值与解释来自 chevy222/app-cf-checkin
+// 与 L0NE-6/Trae-AutoCheckin 的真机实测对照。
+var exchangeRejectHints = map[string]string{
+	"10101": "refreshToken 与换票的客户端不匹配（旧版取票或 SOLO 线签发的票；同一账号被别处轮换过也会），重新登录取一次凭据即可",
+	"20101": "refreshToken 已失效或被轮换掉（同一账号别在多处同时刷新），重新登录取一次凭据即可",
+	"20403": "refreshToken 与设备不匹配（票不是这份设备资料签发的），重新登录取一次凭据即可",
+	"20405": "上游要求设备证明（新版换票校验），当前请求没有设备签名，重新登录也解决不了",
+}
+
+// exchangeRejectHint 从 4xx 响应体里认出上面那几个码，认不出返回空。
+// 只认带引号的形态（`"Code":"10101"`），避免别的数字串里恰好含这几位。
+func exchangeRejectHint(body string) string {
+	for code, hint := range exchangeRejectHints {
+		if strings.Contains(body, `"`+code+`"`) {
+			return hint
+		}
+	}
+	return ""
+}
+
 // refreshLocked 是 RefreshToken 的持锁内部实现；调用方必须已持有 a 写锁。
 // 任何失败路径都不改写 a 字段，保证旧 refreshToken 可重试。
 func (c *Client) refreshLocked(a *auth.Auth) error {
@@ -332,6 +372,14 @@ func (c *Client) refreshLocked(a *auth.Auth) error {
 	OAuthHeaders(req)
 	data, err := c.doJSON(req)
 	if err != nil {
+		// 换票被拒：把 4xx 真因翻成人话。Classify 只给类别（400 → client），既不告诉运维
+		// 「这号该重登」，也不该拿它去降权——refreshToken 用不了是凭证级问题，归 SessionDead。
+		var ue *Error
+		if errors.As(err, &ue) {
+			if h := exchangeRejectHint(ue.Msg); h != "" {
+				return &Error{Kind: ErrSessionDead, Status: ue.Status, Msg: h}
+			}
+		}
 		return err
 	}
 	var resp struct {
@@ -907,13 +955,16 @@ func (c *Client) FetchModels(a *auth.Auth) ([]ModelInfo, error) {
 	return out, nil
 }
 
-// CheckinStatus 查询签到状态；credits 返回**本次可领**的积分（上游 credits + extra_credits，
-// 实测免费档 150+50=200，与官方「每日签到」口径一致）。
+// CheckinStatus 查询签到状态；credits 返回**本次实收**积分，只取上游 credits 一个字段。
+//
+// 实测不加 extra_credits（2026-10-16）：status 回 credits=100 且 extra_credits=100，而当天入账的
+// 额度包 checkin_YYYYMMDD_<uid> 只有 100；连续 15 天 Σ包 与面板 credits 逐位吻合、多不出那 100。
+// 也就是说 extra_credits 是展示值（连签加成），**没有进余额**——加上去就把「本次所得」虚报一倍。
 func (c *Client) CheckinStatus(a *auth.Auth) (checkedIn bool, credits int64, enable bool, err error) {
 	if a != nil && a.Realm() == auth.RealmIntl {
 		return false, 0, false, ErrNoIntlUG
 	}
-	req, err := http.NewRequest(http.MethodPost, c.ugBase()+EpCheckinStatus, bytes.NewReader([]byte("{}")))
+	req, err := http.NewRequest(http.MethodPost, c.ugBase()+EpCheckinStatus, bytes.NewReader([]byte(ugBody)))
 	if err != nil {
 		return false, 0, false, err
 	}
@@ -923,14 +974,14 @@ func (c *Client) CheckinStatus(a *auth.Auth) (checkedIn bool, credits int64, ena
 		return false, 0, false, err
 	}
 	var resp struct {
-		CheckedIn    bool   `json:"checked_in"`
-		Credits      int64  `json:"credits"`
-		ExtraCredits int64  `json:"extra_credits"`
-		Enable       bool   `json:"enable"`
-		Code         int    `json:"code"`
-		Message      string `json:"message"`
-		Msg          string `json:"msg"`
-		Success      *bool  `json:"success"`
+		CheckedIn bool  `json:"checked_in"`
+		Credits   int64 `json:"credits"`
+		// extra_credits 故意**不接**：它是连签加成的展示值，实测没有入账（见函数注释）。
+		Enable  bool   `json:"enable"`
+		Code    int    `json:"code"`
+		Message string `json:"message"`
+		Msg     string `json:"msg"`
+		Success *bool  `json:"success"`
 	}
 	if err := json.Unmarshal(data, &resp); err != nil {
 		return false, 0, false, fmt.Errorf("checkin status parse: %w", err)
@@ -944,7 +995,7 @@ func (c *Client) CheckinStatus(a *auth.Auth) (checkedIn bool, credits int64, ena
 	if resp.Success != nil && !*resp.Success {
 		return false, 0, false, &BusinessError{Code: resp.Code, Message: "签到状态：" + checkinMsg(resp.Message, resp.Msg)}
 	}
-	return resp.CheckedIn, resp.Credits + resp.ExtraCredits, resp.Enable, nil
+	return resp.CheckedIn, resp.Credits, resp.Enable, nil
 }
 
 // CheckinClaim 执行签到。
@@ -952,7 +1003,7 @@ func (c *Client) CheckinClaim(a *auth.Auth) error {
 	if a != nil && a.Realm() == auth.RealmIntl {
 		return ErrNoIntlUG
 	}
-	req, err := http.NewRequest(http.MethodPost, c.ugBase()+EpCheckinClaim, bytes.NewReader([]byte("{}")))
+	req, err := http.NewRequest(http.MethodPost, c.ugBase()+EpCheckinClaim, bytes.NewReader([]byte(ugBody)))
 	if err != nil {
 		return err
 	}
@@ -984,13 +1035,17 @@ func (c *Client) CheckinClaim(a *auth.Auth) error {
 	return &BusinessError{Code: resp.Code, Message: "签到失败：" + checkinMsg(resp.Message, resp.Msg)}
 }
 
+// ugBody 签到类接口的请求体。带 req_source:1 —— chevy222/app-cf-checkin 按真机抓包记的
+// 客户端口径是 status/claim/usage 三个接口都带这个字段（我们的 {} 目前也 200，属对齐而非修 bug）。
+const ugBody = `{"req_source":1}`
+
 // entUsageBody 积分接口请求体。用**客户端自己的形状**，不是空体：
 // 客户端自带 SDK（`GetIdeUserEntUsageV2`）发的是 {require_usage, req_source, full_data, Request}，
-// 调用点默认 {require_usage:true, full_data:true}（NextAgentX/trae-workbuddy-switch 从客户端
-// 缓存里翻出的原文）。实测本机账号上 `{}` 与这个体返回的 pack 列表完全一致，所以这是去掉
-// 一个潜在失败模式（服务端若哪天把 full_data 默认成 false，`{}` 会拿不到完整 pack 列表）
-// 而非修 bug —— 值不值得改就看这一点。
-const entUsageBody = `{"require_usage":true,"full_data":true}`
+// 调用点默认 {require_usage:true, req_source:1, full_data:true}（NextAgentX/trae-workbuddy-switch
+// 从客户端缓存里翻出的原文 + cf-checkin 的真机抓包）。实测本机账号上 `{}` 与这个体返回的 pack
+// 列表完全一致，所以这是去掉一个潜在失败模式（服务端若哪天把 full_data 默认成 false，`{}` 会拿不到
+// 完整 pack 列表）而非修 bug —— 值不值得改就看这一点。
+const entUsageBody = `{"require_usage":true,"req_source":1,"full_data":true}`
 
 // entUsagePath 积分接口路径：国际版只提供 v1（v2 在 api-sg-central 上恒 404）。
 func entUsagePath(a *auth.Auth) string {
@@ -1104,6 +1159,12 @@ type entUsageResponse struct {
 	IsDollarUsageBill bool `json:"is_dollar_usage_billing"`
 	// UserEntitlementPackList 套餐列表（两地区同形，见 entUsagePack）。
 	UserEntitlementPackList []entUsagePack `json:"user_entitlement_pack_list"`
+	// UsageSummary 总额度口径（实测 {"total_amount":6000,"consumed_amount":434.19}）。
+	// 与 Σpacks 逐位吻合，只在 packs 全都不带面额时当兜底（见 UserEntUsageDetail）。
+	UsageSummary struct {
+		TotalAmount    float64 `json:"total_amount"`
+		ConsumedAmount float64 `json:"consumed_amount"`
+	} `json:"usage_summary"`
 }
 
 // fetchEntUsage 打额度接口并解析（两地区共用，路径与网关见 entUsagePath / ugBaseFor）。
@@ -1185,6 +1246,17 @@ func (c *Client) UserEntUsageDetail(a *auth.Auth) (EntUsage, error) {
 		u.Expire = expireQuota
 	} else {
 		u.Expire = expireAny
+	}
+	// 兜底：packs 一个都不带面额时（免费包只给布尔开关、没有 credits_limit/basic_usage_limit），
+	// 用顶级 usage_summary——实测与 Σpacks 逐位吻合，是同一口径的另一条路。
+	// shortcut: 只兜「packs 全无面额」；部分无面额（混档账号）仍以 packs 为准，需要时再细分。
+	if sm := resp.UsageSummary; sm.TotalAmount > 0 && u.Total == 0 && u.LimitUSD == 0 {
+		if u.Unit == UnitUSD {
+			u.LimitUSD, u.UsedUSD = sm.TotalAmount, sm.ConsumedAmount
+		} else {
+			u.Total = int64(sm.TotalAmount)
+			u.Remain = u.Total - int64(sm.ConsumedAmount)
+		}
 	}
 	return u, nil
 }

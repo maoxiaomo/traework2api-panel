@@ -75,6 +75,42 @@ func (s *Scheduler) allHours() []int {
 	return out
 }
 
+// Status 排程现状：面板显示「下次签到/保活几点」。时点是本地小时，关掉的任务不排。
+type Status struct {
+	CheckinEnabled     bool   `json:"checkin_enabled"`
+	CheckinHours       []int  `json:"checkin_hours"`
+	CheckinNext        string `json:"checkin_next,omitempty"` // RFC3339
+	KeepaliveEnabled   bool   `json:"keepalive_enabled"`
+	KeepaliveHours     []int  `json:"keepalive_hours"`
+	KeepaliveNext      string `json:"keepalive_next,omitempty"`
+	BalanceIntervalSec int    `json:"balance_interval_sec,omitempty"`
+}
+
+// Status 返回当前排程（只读快照）。上次执行不在服务端留痕（日志里有），这里只报下一次。
+func (s *Scheduler) Status() Status {
+	now := time.Now()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	st := Status{
+		CheckinEnabled:     s.cfg.CheckinEnabled,
+		CheckinHours:       s.cfg.CheckinHours,
+		KeepaliveEnabled:   s.cfg.KeepaliveEnabled,
+		KeepaliveHours:     s.cfg.KeepaliveHours,
+		BalanceIntervalSec: int(s.cfg.BalanceRefreshInterval / time.Second),
+	}
+	if st.CheckinEnabled {
+		if t := nextFire(now, s.cfg.CheckinHours); !t.IsZero() {
+			st.CheckinNext = t.Format(time.RFC3339)
+		}
+	}
+	if st.KeepaliveEnabled {
+		if t := nextFire(now, s.cfg.KeepaliveHours); !t.IsZero() {
+			st.KeepaliveNext = t.Format(time.RFC3339)
+		}
+	}
+	return st
+}
+
 // nextFire 返回 now 之后最近的一个整点触发时间；hours 为本地小时（0-23）。
 func nextFire(now time.Time, hours []int) time.Time {
 	var earliest time.Time
@@ -384,8 +420,14 @@ func (s *Scheduler) CheckinUID(uid string) (CheckinResult, error) {
 	// 签到前把 access token 换新的：9 点签到离上一次保活（凌晨 3 点）有段距离，拿一张
 	// 已过期的票只会白跑一轮（照 wild-work：2h 内到期就先刷）。刷失败不在这里报错——真有
 	// 问题会让下面的 status 调用如实暴露，那条错误信息比「刷新失败」更贴题。
-	if _, err := s.cfg.Upstream.RefreshTokenIfNeeded(a, checkinRefreshSkew); err != nil {
+	// 但**真刷了就得落盘**：上游此时已轮换 refreshToken，盘上留旧票的话，进程在下次成功
+	// 刷新前重启 → 该号被判 session 失效并自动禁用（要人工重登）。
+	if refreshed, err := s.cfg.Upstream.RefreshTokenIfNeeded(a, checkinRefreshSkew); err != nil {
 		log.Printf("checkin refresh %s: %v", uid, err)
+	} else if refreshed {
+		if serr := a.SaveAtomic(); serr != nil {
+			log.Printf("checkin refresh %s: 新票落盘失败: %v", uid, serr)
+		}
 	}
 	checkedIn, reward, enable, serr := s.cfg.Upstream.CheckinStatus(a)
 	// token 被别处轮换/提前吊销 → status 报 session 失效：换一张新票再查一次，别把
@@ -393,8 +435,14 @@ func (s *Scheduler) CheckinUID(uid string) (CheckinResult, error) {
 	if isSessionDead(serr) {
 		if rerr := s.cfg.Upstream.RefreshToken(a); rerr != nil {
 			log.Printf("checkin token refresh %s: %v", uid, rerr)
-		} else if checkedIn, reward, enable, serr = s.cfg.Upstream.CheckinStatus(a); serr == nil {
-			log.Printf("checkin %s: status ok after token refresh", uid)
+		} else {
+			// RefreshToken 一定轮换了票，同样必须落盘（理由同上）。
+			if serr := a.SaveAtomic(); serr != nil {
+				log.Printf("checkin token refresh %s: 新票落盘失败: %v", uid, serr)
+			}
+			if checkedIn, reward, enable, serr = s.cfg.Upstream.CheckinStatus(a); serr == nil {
+				log.Printf("checkin status %s: status ok after token refresh", uid)
+			}
 		}
 	}
 	var checkinErr error
@@ -457,13 +505,14 @@ func (s *Scheduler) CheckinUID(uid string) (CheckinResult, error) {
 		return res, err
 	}
 	// 先落余额与到期时间（签到后的新值），再谈解冻/冷却。
-	// ReenableIfCredits 会在 remain>0 时清网关冷却，即「签到解冻」（改动前即如此）。
-	// 它不碰签到域冷却，所以下面两条路径都不会把签到冷却冲掉。
+	// 「签到解冻」（ReenableIfCredits 在 remain>0 时清网关冷却）**只在成功路径上做**：
+	// 失败路径也调它，等于一次失败签到顺手把 12h 计划冷却冲掉。它不碰签到域冷却，
+	// 所以下面那条路径不会把签到冷却冲掉。
 	//
 	// 这里传积分口径的 u.Remain：签到只存在于国内路径（国际版在本函数开头就 return 了），
 	// 所以拿到的必然是积分口径，美元号的 0 不会走进来。
-	s.cfg.Pool.ReenableIfCredits(uid, u.Remain)
 	if checkinErr == nil {
+		s.cfg.Pool.ReenableIfCredits(uid, u.Remain)
 		s.cfg.Pool.ClearCheckinCooldown(uid)
 		return res, nil
 	}

@@ -84,7 +84,9 @@ func (e *SOLOStreamError) Error() string {
 func soloSpecificKind(code int64, msg string) (ErrKind, bool) {
 	lower := strings.ToLower(msg)
 	switch {
-	case code == 1005 || strings.Contains(lower, "plan"):
+	// 1005 plan 权益不足。文字判据只在**没有结构化业务码**时才用（code==0）：否则
+	// 111005 这种「数字里含 1005」的未知码会被误判成 12h 硬冷却（Classify 现在会无条件查这张表）。
+	case code == 1005 || (code == 0 && strings.Contains(lower, "plan")):
 		return ErrPlanLimit, true
 	// 模型配置为空 / 参数非法是**模型**问题，不是账号问题，罚号没有意义。
 	// 实测：function 给错通道时上游回 4001 "the param is invalid"，

@@ -42,6 +42,34 @@ func entUsageClient(t *testing.T, body string, wantPath string) *Client {
 	})
 }
 
+// TestEntUsageSummaryFallback packs 一个面额都不带时（免费包只有布尔开关），用顶级
+// usage_summary 兜底——实测它 {total_amount, consumed_amount} 与 Σpacks 逐位吻合，是同一口径的另一条路。
+func TestEntUsageSummaryFallback(t *testing.T) {
+	// 18 个免费包、全无 credits_limit；summary 才是唯一有数的口径。
+	body := `{"is_dollar_usage_billing":false,
+	  "usage_summary":{"total_amount":6000,"consumed_amount":434.19},
+	  "user_entitlement_pack_list":[{"entitlement_base_info":{"quota":{"is_free":true}},"usage":{"credits_amount":0}}]}`
+	c := entUsageClient(t, body, EpEntUsage)
+	u, err := c.UserEntUsageDetail(&auth.Auth{UID: "u1"})
+	if err != nil {
+		t.Fatalf("err=%v", err)
+	}
+	if u.Total != 6000 || u.Remain != 5566 {
+		t.Errorf("兜底口径 remain/total = %d/%d，期望 5566/6000", u.Remain, u.Total)
+	}
+	// 有面额时不许被 summary 覆盖（宁可少算也不要两种口径混着来）。
+	withPack := `{"is_dollar_usage_billing":false,
+	  "usage_summary":{"total_amount":6000,"consumed_amount":434.19},
+	  "user_entitlement_pack_list":[{"entitlement_base_info":{"quota":{"credits_limit":100}},"usage":{"credits_amount":10}}]}`
+	u2, err := entUsageClient(t, withPack, EpEntUsage).UserEntUsageDetail(&auth.Auth{UID: "u1"})
+	if err != nil {
+		t.Fatalf("err=%v", err)
+	}
+	if u2.Total != 100 || u2.Remain != 90 {
+		t.Errorf("有面额时不该走兜底: remain/total = %d/%d，期望 90/100", u2.Remain, u2.Total)
+	}
+}
+
 // TestEntUsageUnitFromRealFixtures 两个地区的真实报文都要被正确判口径。
 func TestEntUsageUnitFromRealFixtures(t *testing.T) {
 	t.Run("国内=积分口径", func(t *testing.T) {

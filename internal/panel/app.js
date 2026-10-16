@@ -186,20 +186,14 @@ function credTitle(a) {
   }
   return '剩余 / 总额（上游积分包）';
 }
-// credCell 额度列单元格。
-// 美元号：显示「剩余 / 额度」+ 已用与剩余百分比——只显示美元数会把「$1 里已用 6 分钱」
-// 读成「满额」，百分比才是运维真正要看的那个数。
+// credCell 额度列单元格：只给一行「剩余 / 总额」；已用量与百分比在悬停提示（credTitle）里，
+// 单元格再压一行小字是重复。
 function credCell(a) {
   a = a || {}; // 兜底：坏输入宁可渲染成 0/—，也不要抛异常把整张表打空
   if (isUSD(a)) {
     const limit = Number(a.limit_usd || 0);
-    const used = Number(a.used_usd || 0);
-    const remain = usdRemain(a);
-    const pct = limit > 0 ? (remain / limit * 100) : null;
-    return '<div class="n">' + esc(fmtUSD(remain)) +
-      (limit > 0 ? '<span class="tot">/' + esc(fmtUSD(limit)) + '</span>' : '') + '</div>' +
-      '<div class="note">已用 ' + esc(fmtUSD(used)) +
-      (pct == null ? '' : ' · 剩 ' + pct.toFixed(1) + '%') + '</div>';
+    return '<div class="n">' + esc(fmtUSD(usdRemain(a))) +
+      (limit > 0 ? '<span class="tot">/' + esc(fmtUSD(limit)) + '</span>' : '') + '</div>';
   }
   // 国际版一律按美元计量：还没取到美元数时显示「—」，不退回积分分支的 0——
   // 0 会被读成「没额度 / 无限量」，这正是国际版最容易看错的地方。
@@ -258,10 +252,13 @@ function ago(t) {
   return h < 24 ? h + ' 小时前' : Math.floor(h / 24) + ' 天前';
 }
 
+// uid → 今日是否已签。只在用户点「签到状态」后填充（按需拉取，不吃额度）；未拉取时行上无标记。
+let checkinState = {};
+
 function renderAccounts(list) {
   const tb = $('accBody');
   if (!list.length) {
-    tb.innerHTML = '<tr><td colspan="10"><div class="empty"><div class="big">账号池是空的</div>点击右上角「添加账号」，用浏览器登录一个 Trae 账号</div></td></tr>';
+    tb.innerHTML = '<tr><td colspan="11"><div class="empty"><div class="big">账号池是空的</div>点击右上角「添加账号」，用浏览器登录一个 Trae 账号</div></td></tr>';
     return;
   }
   tb.innerHTML = list.map(a => {
@@ -274,12 +271,22 @@ function renderAccounts(list) {
     if (!a.disabled && a.checkin_cooling) {
       st.push(tag('warn', '签到冷却', a.checkin_reason || '签到失败，已暂停自动签到'));
     }
+    // 今日签到状态：只读查询过一次才显示（按需拉取，不点就没标记，也没额外上游请求）。
+    const cs = checkinState[String(a.uid)];
+    if (!a.disabled && cs === true) st.push(tag('mute', '今日已签'));
+    else if (!a.disabled && cs === false) st.push(tag('warn', '今日未签'));
     // 国际版**没有签到**（EpCheckin* 在国际域全 404）：签到按钮置灰 + 提示。
     // 「刷新」不再置灰：积分/套餐在国际版走 v1 路径（EpEntUsageIntl），能取到到期时间；
     // 免费号返回的 0 积分是真实状态，不是接口不可用。
     const intlOff = a.realm === 'intl' ? ' disabled title="国际版无签到"' : '';
     const acts = ['<button class="xs" data-a="checkin" data-u="' + esc(a.uid) + '"' + intlOff + '>签到</button>',
       '<button class="xs" data-a="balance" data-u="' + esc(a.uid) + '">刷新</button>',
+      // 单号刷票：只动这个号，省掉整池保活。
+      '<button class="xs" data-a="refresh" data-u="' + esc(a.uid) +
+        '" title="只给这个号换一张新 token（不动其它账号）">刷 token</button>',
+      // 凭证预览：只回 token 前缀与长度，用来确认「盘上这份是谁、什么时候过期」。
+      '<button class="xs" data-a="cred" data-u="' + esc(a.uid) +
+        '" title="看盘上这份凭证（脱敏）">凭证</button>',
       // 换指纹 = 手动解 9074（设备维度风控）。设备号直接挂 tooltip：排障时要看得见当前值。
       '<button class="xs" data-a="rotate-device" data-u="' + esc(a.uid) +
         '" title="换一套签到/积分用的设备指纹；当前 ' + esc(a.device_id || '—') +
@@ -293,6 +300,7 @@ function renderAccounts(list) {
       '<td>' + st.join(' ') + '</td>' +
       '<td class="cred" title="' + esc(credTitle(a)) + '">' + credCell(a) + '</td>' +
       '<td>' + expCell(a.expire) + '</td>' +
+      '<td>' + expCell(a.token_expires_at) + '</td>' +
       '<td class="num">' + (a.err_count || 0) + '</td>' +
       '<td class="num" title="累计成功 / 失败（自记录起）">' + (a.success_count || 0) +
         ' <span style="color:var(--ink-3)">/</span> <span style="color:var(--bad)">' + (a.err_total || 0) + '</span></td>' +
@@ -329,6 +337,13 @@ async function loadOverview(quiet) {
       }
     }
     $('sCheckin').textContent = list.filter(a => a.checkin_cooling && !a.disabled).length;
+    // 排程现状：只报下一次（时点是本地小时）。「已关」与「未排」都显示 —。
+    const sch = d.schedule || {};
+    $('sSchedule').textContent = sch.checkin_next
+      ? new Date(sch.checkin_next).toTimeString().slice(0, 5) : (sch.checkin_enabled === false ? '已关' : '—');
+    $('sSchedule').parentElement.title = '签到 ' + (sch.checkin_enabled ? (sch.checkin_hours || []).join('/') + ' 时' : '已关') +
+      ' · 保活 ' + (sch.keepalive_enabled ? (sch.keepalive_hours || []).join('/') + ' 时' : '已关') +
+      (sch.balance_interval_sec ? ' · 余额每 ' + Math.round(sch.balance_interval_sec / 60) + ' 分' : '');
     $('navSub').textContent = 'v' + d.version;
     $('navVer').textContent = 'v' + d.version;
     $('navState').textContent = d.healthy > 0 ? '服务正常' : (d.total ? '无可用账号' : '待添加账号');
@@ -410,6 +425,8 @@ function mdRowHtml(m) {
   const tip = m.name ? ' title="' + esc(m.name) + '"' : '';
   return '<tr><td class="mark" aria-hidden="true"><i></i></td>' +
     '<td class="who"' + tip + '><div class="nm">' + esc(m.id) +
+      // Max 档是与原条目并列的独立模型（<模型>-max），不加标记会看成两行同名模型。
+      (m.max ? ' ' + tag('mute', 'Max 上下文') : '') +
       (m.legacy ? ' ' + tag('warn', '上代', m.legacy_reason || '客户端已隐藏，本仓仍放行') : '') + '</div>' +
     (m.name ? '<div class="id">' + esc(m.name) + '</div>' : '') + '</td>' +
     '<td>' + (m.capability ? tag('mute', m.capability) : '—') + '</td>' +
@@ -1784,6 +1801,33 @@ function checkinMsg(rs, accounts) {
     } catch (e) { toast(e.message, 'err'); }
     loadOverview(true);
   };
+  // 导入凭证：粘贴「登录回调链接」或「凭证 JSON」，服务端按首字符分派，与「添加账号」同管线。
+  $('btnImport').onclick = async () => {
+    const txt = prompt('粘贴「登录回调链接」或「凭证 JSON」：');
+    if (!txt || !txt.trim()) return;
+    try {
+      const d = await api('accounts/import', { method: 'POST', body: txt.trim() });
+      toast(d.action === 'skipped_existing_newer'
+        ? '已存在更新的凭证，未覆盖' : '已导入 ' + (d.nickname || d.uid), 'ok');
+    } catch (e) { toast(e.message, 'err'); }
+    loadOverview(true);
+  };
+  // 签到状态：只读查一次（不领取、不吃额度），结果落在行上的「今日已签/未签」标记里。
+  $('btnCheckinState').onclick = async () => {
+    const b = $('btnCheckinState');
+    b.disabled = true;
+    try {
+      const d = await api('checkin_status');
+      checkinState = {};
+      for (const r of (d.accounts || [])) checkinState[String(r.uid)] = !!r.checked_in;
+      const parts = ['已签 ' + d.checked, '未签 ' + d.unchecked];
+      if (d.failed) parts.push('查询失败 ' + d.failed);
+      const skipped = (d.accounts || []).filter(r => r.skipped).length;
+      if (skipped) parts.push('无签到接口 ' + skipped);
+      $('accNote').textContent = '签到状态：' + parts.join(' · ');
+    } catch (e) { toast(e.message, 'err'); }
+    finally { b.disabled = false; loadOverview(true); }
+  };
   $('accBody').addEventListener('click', async ev => {
     const b = ev.target.closest('button[data-a]');
     if (!b) return;
@@ -1792,6 +1836,14 @@ function checkinMsg(rs, accounts) {
     if (a === 'disable' && !confirm('禁用后该账号不再参与选号，需手动解冻才能恢复。确认禁用？')) return;
     if (a === 'enable' && !confirm('重新启用该账号，让它立刻参与选号？')) return;
     if (a === 'rotate-device' && !confirm('换一套签到/积分设备指纹？服务端按设备记账，换号即重新计数（9074 风控时用它脱开旧标记）。')) return;
+    // 凭证预览是只读 GET（服务端只回 token 前缀与长度），不走下面那条 POST 通用路径。
+    if (a === 'cred') {
+      try {
+        const d = await api('accounts/' + encodeURIComponent(u) + '/json');
+        alert('盘上这份凭证（脱敏）：\n' + JSON.stringify(d, null, 2));
+      } catch (e) { toast(e.message, 'err'); }
+      return;
+    }
     b.disabled = true;
     try {
       const r = await api('accounts/' + encodeURIComponent(u) + '/' + a, { method: 'POST', body: '{}' });
@@ -1807,6 +1859,8 @@ function checkinMsg(rs, accounts) {
             : '，积分包 ' + acc.credits + (acc.credits_total ? '/' + acc.credits_total : ''))
           : ''), 'ok');
       } else if (a === 'clear-cooldown') toast('已解除冷却', 'ok');
+      else if (a === 'refresh') toast('这个号的 token 已换新' + (r.expires_at
+        ? '，到期 ' + new Date(r.expires_at * 1000).toLocaleString() : ''), 'ok');
       else if (a === 'rotate-device') toast('已换设备指纹' + (r.device_id ? '：' + r.device_id : ''), 'ok');
       else if (a === 'disable') toast('已禁用', 'ok');
       else if (a === 'enable') toast('已启用', 'ok');

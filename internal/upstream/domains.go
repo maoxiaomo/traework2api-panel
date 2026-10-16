@@ -334,10 +334,17 @@ func (c *Client) effectiveAgentBase(realm string) string {
 		return h
 	}
 	if realm == auth.RealmIntl {
-		if c.AgentHostIntl != "" {
-			return c.AgentHostIntl
+		if h := c.agentBaseIntl(); h != "" {
+			return h
 		}
 		return AgentHostIntl
 	}
 	return c.agentBase()
+}
+
+// agentBaseIntl 显式配置的国际版基址（同 agentBase：写侧可能热改，读要走锁）。
+func (c *Client) agentBaseIntl() string {
+	c.hostMu.RLock()
+	defer c.hostMu.RUnlock()
+	return c.AgentHostIntl
 }

@@ -33,6 +33,39 @@ func TestAppJSIdsExistInHTML(t *testing.T) {
 	}
 }
 
+// TestModelRowShowsMaxTag Max 档行要带标记：它与原条目同名同展示名，
+// 不标出来会被看成两行重复的模型。
+func TestModelRowShowsMaxTag(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("无 node，跳过模型行断言")
+	}
+	raw, err := os.ReadFile("app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(raw)
+	// fmtNum / fnLabel 是单行函数，extractJSFunc 抠不出来，按 app.js 逐字复刻（同 audit_panel_test）。
+	driver := `const assert = require('assert');
+function fmtNum(n) { return Number(n || 0).toLocaleString('en-US'); }
+const FN_LABEL = { solo_work_lite: 'Work', solo_coder: 'Coder' };
+function fnLabel(fn) { return FN_LABEL[fn] || fn || '—'; }
+` + extractJSFunc(t, src, "esc") + "\n" +
+		extractJSFunc(t, src, "tag") + "\n" +
+		extractJSFunc(t, src, "switchLabel") + "\n" +
+		extractJSFunc(t, src, "thinkCell") + "\n" +
+		extractJSFunc(t, src, "mdRowHtml") + `
+const maxRow = mdRowHtml({ id: 'cn:glm-5.2-max', name: 'GLM-5.2', context_length: 1000000, max: true });
+assert.ok(maxRow.includes('Max 上下文'), 'Max 档行没标记: ' + maxRow);
+const baseRow = mdRowHtml({ id: 'cn:glm-5.2', name: 'GLM-5.2', context_length: 116000 });
+assert.ok(!baseRow.includes('Max 上下文'), '普通行不该有 Max 标记: ' + baseRow);
+`
+	out, err := exec.Command(node, "-e", driver).CombinedOutput()
+	if err != nil {
+		t.Fatalf("node 断言失败: %v\n%s", err, out)
+	}
+}
+
 // TestModelFilterPure 模型筛选/排序是纯函数（只吃参数、只返值），抠出来喂 node 断言。
 // 抓的是「算错会筛掉本该显示的模型」那几件事：空条件全通过、关键字 AND、域前缀、
 // 排序不倒序。没有 node 就跳过——这是给改筛选逻辑的人兜底，不是 CI 硬依赖。

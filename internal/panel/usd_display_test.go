@@ -14,7 +14,8 @@ import (
 // 「0 / 无额度」——用户看到的就是那个 0。这里把显示层的纯函数抠出来喂 node 断言：
 //
 //	① 金额格式化：$0.00059 这种 5 位小数不许被砍成 0（砍了就回到「没花钱」的错觉）
-//	② 额度单元格：美元号必须显示「剩余 / 额度 + 已用」，且**不能再出现裸 0**
+//	② 额度单元格：美元号只给一行「剩余 / 额度」（已用量与百分比在悬停提示里），
+//	   且**不能再出现裸 0**
 //	③ 国内号渲染逐字不变（零回归）
 //
 // 汇总卡（`renderPackages`）碰 DOM，没法直接跑，只能做源码级守卫。
@@ -57,8 +58,10 @@ const intl = { credit_unit: 'usd', credits: 0, used_usd: 0.00059, limit_usd: 1 }
 const intlCell = credCell(intl);
 assert.ok(intlCell.includes('$0.99941'), '美元号要显示剩余美元，实得: ' + intlCell);
 assert.ok(intlCell.includes('/$1.00'), '美元号要显示额度分母，实得: ' + intlCell);
-assert.ok(intlCell.includes('已用 $0.00059'), '美元号要显示已用量，实得: ' + intlCell);
-assert.ok(intlCell.includes('剩 99.9%'), '要给出剩余百分比，实得: ' + intlCell);
+// 只许一行：单元格里再压「已用 … · 剩 …%」是与「剩余/总额」重复的小字（用户 2026-10-16 要求去掉），
+// 这两项信息仍在悬停提示 credTitle 里。
+assert.ok(!/class="note"/.test(intlCell), '美元单元格不该再有第二行小字，实得: ' + intlCell);
+assert.ok(!intlCell.includes('已用') && !/%/.test(intlCell), '已用与百分比只留在提示里，实得: ' + intlCell);
 // 这是用户实际看到的那个 bug：拿积分字段渲染成裸 0
 assert.ok(!/>0<\/div>/.test(intlCell.replace(/<span[^>]*>[\s\S]*?<\/span>/g, '')),
   '美元号不能再出现裸 0（那正是「国际版显示 0」的观感）: ' + intlCell);

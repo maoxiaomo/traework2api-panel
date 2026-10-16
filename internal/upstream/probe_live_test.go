@@ -195,6 +195,11 @@ func TestProbeLive(t *testing.T) {
 			continue
 		}
 		fmt.Printf("  顶层字段: %s\n", probeKeys(m))
+		// usage_summary 的真实字段：额度兜底口径靠它（packs 里免费包不带 credits_limit 时）。
+		if s, ok := m["usage_summary"]; ok {
+			raw, _ := json.Marshal(s)
+			fmt.Printf("  usage_summary=%s\n", truncate(string(raw), 300))
+		}
 		if pl, ok := m["user_entitlement_pack_list"].([]any); ok {
 			fmt.Printf("  pack 数量: %d\n", len(pl))
 			for _, p := range pl {
@@ -269,6 +274,40 @@ func TestProbeLiveReasoningEffort(t *testing.T) {
 			continue
 		}
 		fmt.Printf("通了，SSE 前 240 字节: %s\n", short(head))
+	}
+}
+
+// TestProbeLiveCheckinRaw 只读：打印签到 status 的**原始**响应体（不 claim）。
+//
+// 用途：定「每日签到实际到账多少」的口径。实收看额度包 checkin_YYYYMMDD_<uid> 的 size
+// （2026-10-16 实测：每天恒 100，与面板 credits 逐位相符），而我们的 CheckinStatus 把
+// status 的 credits+extra_credits 相加当作「本次所得」——两者对不上时以包为准。
+// 手动跑：TW2A_PROBE_CHECKIN=1 TW2A_AUTH_DIR=/opt/traework2api-panel/auths go test ./internal/upstream -run TestProbeLiveCheckinRaw -v
+func TestProbeLiveCheckinRaw(t *testing.T) {
+	if os.Getenv("TW2A_PROBE_CHECKIN") == "" {
+		t.Skip("置 TW2A_PROBE_CHECKIN=1 才跑（只读，不 claim）")
+	}
+	dir := os.Getenv("TW2A_AUTH_DIR")
+	if dir == "" {
+		dir = "../../auths"
+	}
+	as, err := auth.LoadDir(dir)
+	if err != nil || len(as) == 0 {
+		t.Fatalf("加载账号失败: %v (dir=%s)", err, dir)
+	}
+	c := New()
+	for _, a := range as {
+		if a.Realm() == auth.RealmIntl {
+			fmt.Printf("----- uid=%s 国际版无签到接口，跳过\n", a.UID)
+			continue
+		}
+		req, err := http.NewRequest(http.MethodPost, c.ugBase()+EpCheckinStatus, bytes.NewReader([]byte("{}")))
+		if err != nil {
+			t.Fatal(err)
+		}
+		UgHeaders(req, a)
+		data, derr := c.doJSON(req)
+		fmt.Printf("----- uid=%s err=%v 原始 body=%s\n", a.UID, derr, truncate(string(data), 400))
 	}
 }
 

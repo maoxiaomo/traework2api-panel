@@ -61,15 +61,16 @@ func applyUpstream(up *upstream.Client, c *Config) {
 	// agent 基址：显式配置优先，留空回落内置常量；两者都只是「兜底」——
 	// domains.go 的自动发现一旦拿到结果就覆盖它们（见 Client.effectiveAgentBase）。
 	// 这里**必须显式写回**（不能只在非空时赋值）：否则面板里清空该项后，旧值会留在
-	// 结构体里，用户以为清掉了其实没有。
-	up.AgentHost = c.Upstream.AgentHost
-	if up.AgentHost == "" {
-		up.AgentHost = upstream.AgentHost
+	// 结构体里，用户以为清掉了其实没有。写侧走 SetAgentHosts：请求路径在并发读这两个
+	// 字段（applyUpstream 是热路径，配置一改就调）。
+	cn, intl := c.Upstream.AgentHost, c.Upstream.AgentHostIntl
+	if cn == "" {
+		cn = upstream.AgentHost
 	}
-	up.AgentHostIntl = c.Upstream.AgentHostIntl
-	if up.AgentHostIntl == "" {
-		up.AgentHostIntl = upstream.AgentHostIntl
+	if intl == "" {
+		intl = upstream.AgentHostIntl
 	}
+	up.SetAgentHosts(cn, intl)
 }
 
 // usagePathFor 由 state 文件路径推出用量台账路径：同目录、文件名 usage.json。

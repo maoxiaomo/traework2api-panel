@@ -662,6 +662,8 @@ legend { font-size: 12px; color: var(--ink-3); font-weight: 600; padding-bottom:
              单列一张卡，不把美元并进「积分合计」——两种单位不可换算。无美元账号时整卡隐藏。 -->
         <div class="stat" id="sCreditsUsdBox" hidden><div class="v" id="sCreditsUsd">-</div><div class="k">国际额度（美元）</div></div>
         <div class="stat warn"><div class="v" id="sCheckin">-</div><div class="k">签到冷却</div></div>
+        <!-- 排程现状：下次签到/保活几点（时点在服务端配置里，改排程要重启）。 -->
+        <div class="stat" title="排程现状（面板只读）"><div class="v" id="sSchedule">-</div><div class="k">下次签到</div></div>
       </div>
 
       <div class="box">
@@ -670,15 +672,17 @@ legend { font-size: 12px; color: var(--ink-3); font-weight: 600; padding-bottom:
           <span class="grow"></span>
           <span class="note" id="accNote"></span>
           <button class="xs" id="btnCheckinAll">全部签到</button>
+          <button class="xs" id="btnCheckinState" title="只读查询各账号今天签了没（不领取、不吃额度）">签到状态</button>
           <button class="xs" id="btnBalanceAll">全部刷新积分</button>
           <button class="xs" id="btnKeepalive" title="立刻对全账号刷新 token（不花积分）">全部保活</button>
+          <button class="xs" id="btnImport" title="粘贴「登录回调链接」或「凭证 JSON」导入账号（与「添加账号」同一条换票/落盘管线）">导入凭证</button>
           <button class="xs" id="btnRotateDeviceAll" title="给每个号换一套签到/积分用的设备指纹（9074 风控标记时用；服务端按设备记账，换号即重新计数）">全部换指纹</button>
         </header>
         <div class="tbl-wrap">
         <table class="acc">
           <thead><tr>
             <th class="mark" aria-hidden="true"></th>
-            <th>账号</th><th>状态</th><th>额度</th><th>到期</th><th>错误</th><th>成功 / 失败</th><th>在途</th><th>用量</th><th>最近成功</th><th class="c-acts"></th>
+            <th>账号</th><th>状态</th><th>额度</th><th>到期</th><th>Token</th><th>错误</th><th>成功 / 失败</th><th>在途</th><th>用量</th><th>最近成功</th><th class="c-acts"></th>
           </tr></thead>
           <tbody id="accBody"></tbody>
         </table>

@@ -72,8 +72,9 @@ type Config struct {
 		HostDiscovery bool `json:"host_discovery"`
 		// HostDiscoveryHours 自动跟进的刷新周期（小时，默认 6）。改了需重启（ticker 启动时定）。
 		HostDiscoveryHours int `json:"host_discovery_hours"`
-		// AgentHost / AgentHostIntl 显式钉死 agent 基址（非空则优先于自动发现；
-		// 留空 = 交给自动发现，发现失败回落内置常量）。热生效。
+		// AgentHost / AgentHostIntl 显式钉死 agent 基址。**优先级以实现为准**：自动发现出来的
+		// 基址优先于这里（见 internal/upstream/domains.go 的解析顺序），这里在「没发现到」时
+		// 才生效；把 host_discovery 关掉即可完全按这里的值走。热生效。
 		AgentHost     string `json:"agent_host"`
 		AgentHostIntl string `json:"agent_host_intl"`
 		// MaxFunction 开启 Max 上下文时出站 function 换成哪个上游面（默认 chat_v3）。
@@ -394,7 +395,9 @@ func (c *Config) normalize() error {
 		c.Pool.IdleWeightMax = 5
 	}
 	if c.Pool.MaxInFlight < 0 {
-		c.Pool.MaxInFlight = 0
+		// 负数不是「不限」：池以 >0 为限流判据，夹成 0 等于把非法值静默变成最宽松档。
+		log.Printf("config: pool.max_in_flight=%d 非法（负数），回退默认 3", c.Pool.MaxInFlight)
+		c.Pool.MaxInFlight = 3
 	}
 	// 显式 0/负数直接报错（面板填 0 就该得到"必须 > 0"，而不是被静默改成 120）；
 	// 键缺席时 Default() 已给 120，所以老配置不会因此启动失败。
@@ -430,6 +433,10 @@ func (c *Config) normalize() error {
 		c.Listen = ":7864"
 	}
 	if !strings.HasPrefix(c.Listen, ":") && !strings.Contains(c.Listen, ":") {
+		// 裸端口补成 ":7864" = 监听**所有网卡**，不是仅本机。默认绑定不动（线上靠它），
+		// 只把后果说清楚——运维以为「7864」是本机端口时，面板其实是全网可达的。
+		log.Printf("config: listen=%q 是裸端口 → 按所有网卡监听（:%s）；要仅本机请显式写 127.0.0.1:%s",
+			c.Listen, c.Listen, c.Listen)
 		c.Listen = ":" + c.Listen
 	}
 	// 空数组/null 会覆盖掉 Default() 的时点（键缺席才保留），在此补齐：

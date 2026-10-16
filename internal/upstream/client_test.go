@@ -322,18 +322,46 @@ func TestCheckinStatusAndClaim(t *testing.T) {
 		if r.Header.Get("X-User-Region") != "CN" {
 			return nil, errors.New("missing X-User-Region")
 		}
-		return jsonResp(200, `{"checked_in":false,"credits":150,"extra_credits":50,"enable":true}`), nil
+		return jsonResp(200, `{"checked_in":false,"credits":100,"extra_credits":100,"enable":true}`), nil
 	})
 	checkedIn, credits, enable, err := c.CheckinStatus(&auth.Auth{AccessToken: "at"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	// credits 是「本次可领」= credits + extra_credits（免费档 150+50）。
-	if checkedIn || !enable || credits != 200 {
+	// credits 是「本次实收」= 只取上游 credits。夹具里 extra_credits 与 credits 等值（真实报文形态），
+	// 正好守住「不许把它加进来」：15 天 Σ额度包实测每天只入 100，extra 是展示值。
+	if checkedIn || !enable || credits != 100 {
 		t.Errorf("status: checked=%v enable=%v credits=%d", checkedIn, enable, credits)
 	}
 	if path != EpCheckinStatus {
 		t.Errorf("path=%s", path)
+	}
+}
+
+// TestExchangeRejectIsExplainedAndSessionDead 换票被拒的四个码要：① 归 SessionDead（不让 400 被
+// 当成「客户端参数错」去降权）② 把真因翻成人话带在消息里（面板/日志看得到处置）。
+func TestExchangeRejectIsExplainedAndSessionDead(t *testing.T) {
+	body := `{"ResponseMetadata":{"Error":{"Code":"10101","Data":{"__Message.error":"refresh token is not matched to the client"},"Message":"无效参数：{__Message.field}."}},"StandardCode":"040004"}`
+	c := testClient(func(r *http.Request) (*http.Response, error) {
+		if !strings.HasSuffix(r.URL.Path, EpExchange) {
+			return nil, errors.New("不是换票端点: " + r.URL.Path)
+		}
+		return jsonResp(http.StatusBadRequest, body), nil
+	})
+	err := c.RefreshToken(&auth.Auth{RefreshToken: "rt", ApiHost: "https://oauth.example"})
+	var ue *Error
+	if !errors.As(err, &ue) {
+		t.Fatalf("换票失败没带类型化错误: %v", err)
+	}
+	if ue.Kind != ErrSessionDead {
+		t.Errorf("10101 应归 SessionDead（票废了，不是参数错）: %v", ue.Kind)
+	}
+	if !strings.Contains(ue.Msg, "重新登录") {
+		t.Errorf("没带出处置人话: %q", ue.Msg)
+	}
+	// 只有带引号的码才算：别的数字串里恰好含这几位时不许误报。
+	if h := exchangeRejectHint(`{"trace":"a10101b"}`); h != "" {
+		t.Errorf("未加引号的数字串被误认成换票码: %q", h)
 	}
 }
 

@@ -196,8 +196,8 @@ func TestCheckinRetryLoopRescans(t *testing.T) {
 	}
 }
 
-// 签到结果要带出「本次拿多少分」：上游 status 的 credits + extra_credits 落到 result.Credits，
-// 面板据此回报「+200 分」而不是拿积分包合计冒充。
+// 签到结果要带出「本次拿多少分」：上游 status 的 credits 落到 result.Credits，
+// 面板据此回报「+N 分」而不是拿积分包合计冒充。extra_credits 不计入（实测没入账）。
 func TestCheckinUIDReportsEarnedCredits(t *testing.T) {
 	f := &fakeUpstream{resourceRemain: 4500} // claim 默认成功；status 固定 credits=200
 	srv := f.server()

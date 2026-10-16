@@ -126,6 +126,13 @@ func (a *Auth) SetDeviceSeed(seed int64) {
 	a.DeviceSeed = seed
 }
 
+// ExpiresAtValue 读 accessToken 到期时刻（Unix 秒），同 JWT 的读锁口径（面板「Token 到期」列）。
+func (a *Auth) ExpiresAtValue() int64 {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.ExpiresAt
+}
+
 // NeedsRefresh 报告 token 是否将在 within 内过期（或已过期/无 expiry）。
 func (a *Auth) NeedsRefresh(within time.Duration) bool {
 	a.mu.RLock()

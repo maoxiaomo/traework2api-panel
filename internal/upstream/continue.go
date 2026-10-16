@@ -211,6 +211,11 @@ func (r *ContinueReader) flushEvent() {
 	case "done":
 		r.handleDone(pend)
 	default:
+		// 流内 error 事件：原样下发给客户端，同时记一笔——canContinue 靠它别在报错之后
+		// 再续写一段正文（客户端已收到 error+[DONE]，后面又冒出内容就是协议错乱）。
+		if ev.Event == "error" {
+			r.errSeen = true
+		}
 		r.emitBlock(pend)
 	}
 }
@@ -276,6 +281,9 @@ func (r *ContinueReader) switchSegment() bool {
 	r.seg++
 	r.cur, r.br = rc, bufio.NewReaderSize(rc, 64*1024)
 	r.segTok = 0 // 本段判定重置；usage/文本/工具位跨段保留
+	// 上一段的读错误到此已被续写救回：不清掉的话，下面整段流最后会拿这个陈旧错误
+	// 把「已拼完整的回复」上报成传输失败（用量记失败 + 解绑会话粘性）。
+	r.readErr = nil
 	log.Printf("[continue] seg=%d model=%s text=%dB → 续写", r.seg, modelOfBody(r.body), r.text.Len())
 	return true
 }

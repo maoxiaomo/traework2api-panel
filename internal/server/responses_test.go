@@ -289,18 +289,16 @@ func TestResponsesEndpointStreamErrorBeforeSSE(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest("POST", "/v1/responses", strings.NewReader(`{"model":"glm-5.2","input":"hi","stream":true}`))
 	h.ServeHTTP(rec, req)
-	if rec.Code != 200 {
-		t.Fatalf("code=%d want 200 SSE", rec.Code)
+	// 首字节前的失败用真实状态码回（不再伪造 200 + response.failed 帧）：客户端据此重试/上报，
+	// 而「200 + 失败帧」会让上游故障看起来像一次成功的空回复。
+	if rec.Code == 200 {
+		t.Fatalf("首字节前的错误被当成 200 回了: body=%s", rec.Body.String())
 	}
-	if !strings.Contains(rec.Header().Get("Content-Type"), "event-stream") {
-		t.Fatalf("ct=%s body=%s", rec.Header().Get("Content-Type"), rec.Body.String())
+	if strings.Contains(rec.Header().Get("Content-Type"), "event-stream") {
+		t.Fatalf("没写出任何 SSE 却回了流式 Content-Type: %s", rec.Header().Get("Content-Type"))
 	}
-	types := sseTypes(rec.Body.String())
-	if !containsStr(types, "response.failed") {
-		t.Fatalf("types=%v body=%s", types, rec.Body.String())
-	}
-	if containsStr(types, "response.completed") {
-		t.Fatalf("failed stream must not complete: %v", types)
+	if !strings.Contains(rec.Body.String(), "error") {
+		t.Fatalf("错误响应体里没有 error: %s", rec.Body.String())
 	}
 }
 

@@ -236,3 +236,46 @@ func TestSetModelNameInBody(t *testing.T) {
 		t.Error("空变体名应是 no-op")
 	}
 }
+
+// TestMaxTwinModelNameTriggersMax /v1/models 里的公开 Max 名（<模型>-max）与
+// max_context:true 等价：同样换 model（→ __max 变体）与 function（→ Max 面）。
+func TestMaxTwinModelNameTriggersMax(t *testing.T) {
+	installCatalog(t, maxModel())
+	got := chatWith(t, Config{}, `{"model":"cn:glm-5.2-max",
+		"messages":[{"role":"user","content":"hi"}]}`)
+
+	if got["model"] != "glm-5.2__max" || got["function"] != "chat_v3" {
+		t.Errorf("选 -max 条目没开 Max: model=%v function=%v", got["model"], got["function"])
+	}
+	if got["config_name"] != "glm-5.2" {
+		t.Errorf("config_name 应是裸名（-max 不是上游名字）: %v", got["config_name"])
+	}
+}
+
+// TestModelListPublishesMaxTwin Max 档要单独列一条 <模型>-max，窗口报 max 档；
+// 没有更大窗口的模型不出现这种条目——客户端选了也不增长，列出来就是骗人。
+func TestModelListPublishesMaxTwin(t *testing.T) {
+	noMax := upstream.ModelInfo{ID: "glm-5.2-nomax", Name: "GLM-5.2", Function: "solo_work_lite",
+		ContextWindow: 116000}
+	installCatalog(t, maxModel(), noMax)
+	h := NewHandler(Config{Pool: testPoolWith(), Upstream: &upstream.Client{}})
+
+	byID := map[string]map[string]any{}
+	for _, m := range h.Models() {
+		id, _ := m["id"].(string)
+		byID[id] = m
+	}
+	if got := byID["cn:glm-5.2"]["context_length"]; got != int64(116000) {
+		t.Errorf("原条目窗口被改了: %v", got)
+	}
+	twin, ok := byID["cn:glm-5.2-max"]
+	if !ok {
+		t.Fatalf("Max 档没单独列出（/v1/models 共 %d 条，没有 cn:glm-5.2-max）", len(byID))
+	}
+	if twin["context_length"] != int64(1000000) || twin["max"] != true {
+		t.Errorf("Max 条目不对：context_length=%v max=%v", twin["context_length"], twin["max"])
+	}
+	if _, ok := byID["cn:glm-5.2-nomax-max"]; ok {
+		t.Error("没有更大窗口的模型不该有 -max 条目")
+	}
+}

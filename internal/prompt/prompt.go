@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 )
 
 //go:embed defaultprompt.md
@@ -30,6 +31,10 @@ func Load(mode, file string) (string, error) {
 	raw, err := os.ReadFile(file)
 	if err != nil {
 		return "", fmt.Errorf("prompt file %s: %w", file, err)
+	}
+	// 空文件不算「合法 custom」：它会让 custom/append 退化成静默不改写，而面板那边一路报成功。
+	if strings.TrimSpace(string(raw)) == "" {
+		return "", fmt.Errorf("prompt file %s: 内容为空（custom/append 需要非空文本）", file)
 	}
 	return string(raw), nil
 }
