@@ -16,7 +16,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -256,16 +255,15 @@ func (r *auditNoNewline) Read(p []byte) (int, error) {
 
 func TestAuditSSESingleLineUnbounded(t *testing.T) {
 	const total = 32 << 20
-	var m0, m1 runtime.MemStats
-	runtime.GC()
-	runtime.ReadMemStats(&m0)
-	_, err := Aggregate(&auditNoNewline{left: total})
-	runtime.ReadMemStats(&m1)
-	grew := m1.TotalAlloc - m0.TotalAlloc
-	t.Logf("无换行的 %d MB 单帧 → Aggregate 期间累计分配 %d MB（err=%v）",
-		total>>20, grew>>20, err)
-	if grew < total/2 {
-		t.Fatalf("行为已变：只分配了 %d 字节，说明单帧已有限长（很好，改断言）", grew)
+	feed := &auditNoNewline{left: total}
+	_, err := Aggregate(feed)
+	t.Logf("无换行的 %d MB 单帧 → Aggregate 只读掉 %d MB 就返回 err=%v",
+		total>>20, (total-feed.left)>>20, err)
+	if feed.left <= 0 {
+		t.Fatalf("32 MB 无换行单帧被整段读掉：单行仍无上限")
+	}
+	if err == nil {
+		t.Fatalf("单行超过上限却没报错：应判流坏")
 	}
 }
 

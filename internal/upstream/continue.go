@@ -118,7 +118,7 @@ func (r *ContinueReader) Close() error {
 
 // step 处理一行：累积当前事件的原始行，事件边界（空行）时按类型处理。
 func (r *ContinueReader) step() {
-	line, err := r.br.ReadString('\n')
+	line, err := sseLine(r.br)
 	trimmed := strings.TrimRight(line, "\r\n")
 	switch {
 	case trimmed == "":

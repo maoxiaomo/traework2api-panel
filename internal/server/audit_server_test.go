@@ -276,13 +276,21 @@ func TestAuditParallelToolCallsCollapseOnSameIndex(t *testing.T) {
 			}
 		}
 		t.Logf("客户端该拿到 2 个 function_call item；实际下发 output_item.added(function_call)=%d", opened)
-		t.Logf("合并结果: 名字=%v 参数=%v",
-			strings.Contains(body, `"name":"write_file"`), strings.Contains(body, `"arguments":"{\"p\":\"/a\"}"`))
-		if opened != 1 {
-			t.Fatalf("期望复现「两次并行调用被合并成一个 item」：added 数=%d", opened)
+		if opened != 2 {
+			t.Fatalf("同 index 不同 id 的两次调用必须各成一个 item：added 数=%d", opened)
 		}
-		if !strings.Contains(body, `"name":"write_file"`) || !strings.Contains(body, `"arguments":"{\"p\":\"/a\"}"`) {
-			t.Fatalf("期望复现「名字取最后一个、参数被拼接」：%s", body)
+		// 两次调用各自完整：read_file 拿到自己的 /a，write_file 拿到自己的 }（不再被拼在一起）。
+		if !strings.Contains(body, `"call_id":"call_1"`) || !strings.Contains(body, `name":"read_file"`) ||
+			!strings.Contains(body, `"delta":"{\"p\":\"/a\""`) {
+			t.Fatalf("第一次调用（read_file 拿自己的参数）不完整：%s", body)
+		}
+		if !strings.Contains(body, `"call_id":"call_2"`) || !strings.Contains(body, `name":"write_file"`) ||
+			!strings.Contains(body, `"delta":"}"`) {
+			t.Fatalf("第二次调用（write_file 拿 }）不完整：%s", body)
+		}
+		// 合并的老行为：一次调用把 {"p":"/a"} 整段拿走、名字变成最后一个。
+		if strings.Contains(body, `"arguments":"{\"p\":\"/a\"}"`) {
+			t.Fatalf("两次调用又被拼成一个完整参数：%s", body)
 		}
 	})
 
@@ -297,8 +305,8 @@ func TestAuditParallelToolCallsCollapseOnSameIndex(t *testing.T) {
 		body := rec.Body.String()
 		blocks := strings.Count(body, `"type":"tool_use"`)
 		t.Logf("content_block_start(tool_use) 数量=%d", blocks)
-		if blocks != 1 {
-			t.Fatalf("期望复现「两次并行调用合并成一个 tool_use 块」：块数=%d", blocks)
+		if blocks != 2 {
+			t.Fatalf("同 index 不同 id 的两次调用必须各起一个 tool_use 块：块数=%d", blocks)
 		}
 	})
 

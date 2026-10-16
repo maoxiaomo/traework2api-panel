@@ -252,3 +252,24 @@ func TestRequestClientInfoDefaultOn(t *testing.T) {
 		t.Error("显式 false 应关闭来源记录，不能被缺省值覆盖")
 	}
 }
+
+// listen 的空主机 / 0.0.0.0 / :: 都算「绑全接口」——空密钥时面板就此对全网开放，
+// 前端提示必须区分开（原来一律显示「本机免鉴权」）。解析失败按最坏情况算。
+func TestBindsAllInterfaces(t *testing.T) {
+	for _, tc := range []struct {
+		addr string
+		want bool
+	}{
+		{":7864", true},
+		{"0.0.0.0:7864", true},
+		{"[::]:7864", true},
+		{"127.0.0.1:7864", false},
+		{"localhost:7864", false},
+		{"[::1]:7864", false},
+		{"我坏了", true},
+	} {
+		if got := bindsAllInterfaces(tc.addr); got != tc.want {
+			t.Errorf("bindsAllInterfaces(%q)=%v 期望 %v", tc.addr, got, tc.want)
+		}
+	}
+}

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -83,12 +84,16 @@ type fakeRT struct {
 	fixture   []byte
 	bootHosts []string
 	alive     map[string]bool
-	calls     []string
+
+	mu    sync.Mutex // 两区现在是并行发现的，calls 会被两个 goroutine 同时追加
+	calls []string
 }
 
 func (f *fakeRT) RoundTrip(req *http.Request) (*http.Response, error) {
 	host := req.URL.Host
+	f.mu.Lock()
 	f.calls = append(f.calls, req.Method+" "+req.URL.Scheme+"://"+host+req.URL.Path)
+	f.mu.Unlock()
 	mk := func(code int, body string) *http.Response {
 		return &http.Response{
 			StatusCode: code,

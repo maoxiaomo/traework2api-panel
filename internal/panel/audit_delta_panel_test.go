@@ -94,10 +94,16 @@ func TestAuditDeltaAgentHostOverviewFieldsAreDead(t *testing.T) {
 		if err != nil {
 			t.Fatalf("读 %s: %v", f, err)
 		}
-		if strings.Contains(string(raw), "agent_host") {
-			t.Fatalf("%s 里出现了 agent_host —— 面板已经能显示了，请更新审计报告", f)
+		if !strings.Contains(string(raw), "agent_host") {
+			t.Errorf("%s 仍无 agent_host* 读者：运维在面板上看不到生效基址与来源", f)
+		} else {
+			t.Logf("%s: 有 agent_host* 读者（%d 字节）", f, len(raw))
 		}
-		t.Logf("%s: 无 agent_host* 读者（%d 字节）", f, len(raw))
+	}
+	// 渲染那一行要真的用上四个键里的基址（只有 CN 基址时也不该整行空着）。
+	app, _ := os.ReadFile("app.js")
+	if !strings.Contains(string(app), "$('agHostNote')") {
+		t.Error("app.js 没有把 agent_host* 写进面板（缺 agHostNote 渲染）")
 	}
 }
 
@@ -121,11 +127,18 @@ func TestAuditDeltaNewUpstreamConfigItemsAbsentFromPanelForm(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, k := range keys {
-		if strings.Contains(string(app), k) || strings.Contains(string(html), k) {
-			t.Errorf("面板里已经出现 %q —— 该配置项已经可见/可改，请更新报告", k)
+		if !strings.Contains(string(app), k) {
+			t.Errorf("app.js 里没有 %q：配置页看不到也改不了", k)
+		}
+		if !strings.Contains(string(html), k) {
+			t.Errorf("index.html 里没有 %q：表单没有入口", k)
 		}
 	}
-	t.Logf("面板源码里搜不到 %v（app.js %d 字节 / index.html %d 字节）→ 新增配置项不可见、不可改",
+	// host_discovery 是布尔项：必须走 BOOL_FIELDS，否则字符串 "true" 会让后端 Unmarshal 失败。
+	if !strings.Contains(string(app), "BOOL_FIELDS = [") || !strings.Contains(string(app), "'host_discovery'") {
+		t.Error("host_discovery 不在 BOOL_FIELDS 里：会以字符串提交，后端 Unmarshal 失败")
+	}
+	t.Logf("面板里有 %v 的读者（app.js %d 字节 / index.html %d 字节）→ 可见且可改",
 		keys, len(app), len(html))
 }
 

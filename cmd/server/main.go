@@ -197,6 +197,7 @@ func main() {
 		Scheduler:  sch,
 		AuthDir:    cfg.AuthDir,
 		APIKey:     cfg.APIKey,
+		BindAll:    bindsAllInterfaces(cfg.Listen),
 		Version:    appVersion,
 		Logs:       logs,
 		Models:     h.Models,

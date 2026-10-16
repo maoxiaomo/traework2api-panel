@@ -218,6 +218,29 @@ func scanLine(st *sseState, line string) *SOLOEvent {
 	return nil
 }
 
+// maxSSELine 单行上限。ReadString 遇到永不换行的坏帧会一直往内存里堆，
+// 真实帧最大也就 tool_calls 参数级别（几百 KB），8 MB 足够。
+const maxSSELine = 8 << 20
+
+// sseLine 读一行（含换行符），语义同 bufio.ReadString('\n')，但单行超过 maxSSELine 时报错而不是继续堆内存。
+func sseLine(br *bufio.Reader) (string, error) {
+	var sb strings.Builder
+	for {
+		chunk, err := br.ReadSlice('\n')
+		if sb.Len()+len(chunk) > maxSSELine {
+			return "", fmt.Errorf("SSE 单行超过 %d 字节，判流坏", maxSSELine)
+		}
+		sb.Write(chunk)
+		if err == nil {
+			return sb.String(), nil
+		}
+		if err == bufio.ErrBufferFull {
+			continue
+		}
+		return sb.String(), err // io.EOF 等：连已读部分一起返回，调用方语义不变
+	}
+}
+
 // Aggregate 读取完整 SOLO SSE，聚合 response + reasoning + tool_calls + usage，
 // 产出单个 OpenAI chat.completion（非流式）。
 func Aggregate(r io.Reader) (map[string]any, error) {
@@ -234,7 +257,7 @@ func Aggregate(r io.Reader) (map[string]any, error) {
 	)
 	st := &sseState{}
 	for {
-		line, err := br.ReadString('\n')
+		line, err := sseLine(br)
 		if err != nil && err != io.EOF {
 			return nil, err
 		}
@@ -524,7 +547,7 @@ func streamOpts(w http.ResponseWriter, r io.Reader, onErr func(*SOLOStreamError)
 	}
 
 	for {
-		line, err := br.ReadString('\n')
+		line, err := sseLine(br)
 		if err != nil && err != io.EOF {
 			return lastUsage, err
 		}

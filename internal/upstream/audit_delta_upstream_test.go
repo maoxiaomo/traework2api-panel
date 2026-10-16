@@ -163,26 +163,21 @@ func TestAuditDeltaProbeFailOpenOn5xxAnd200(t *testing.T) {
 	}
 	c := audDiscoveryClient(rt)
 
-	// 断言 1：502 判「活」。
-	if ok, why := c.probeAgentBase(context.Background(), "https://api5-normal.mchost.guru"); !ok {
-		t.Fatalf("行为已变（疑似修好）：502 现在判不可用 why=%q", why)
-	} else {
-		t.Logf("probe(api5-normal, 502) → ok=%v why=%q（期望 false）", ok, why)
-	}
-	// 断言 2：200 的任意响应体也判活（不校验 body 是不是 JSON）。
-	if ok, why := c.probeAgentBase(context.Background(), "https://parked.example"); !ok {
-		t.Fatalf("行为已变：200 非 JSON 现在判不可用 why=%q", why)
-	} else {
-		t.Logf("probe(parked.example, 200 HTML) → ok=%v why=%q（期望 false）", ok, why)
-	}
-	// 断言 3：503 判活。
-	if ok, why := c.probeAgentBase(context.Background(), "https://api22-normal-alisg.mchost"); !ok {
-		t.Fatalf("行为已变：503 现在判不可用 why=%q", why)
-	} else {
-		t.Logf("probe(api22-normal-alisg, 503) → ok=%v why=%q（期望 false）", ok, why)
+	// 5xx 与「200 非 JSON」都必须判死：判活会把 realm 基址切到坏主机上。
+	for _, tc := range []struct {
+		host, why string
+	}{
+		{"https://api5-normal.mchost.guru", "502"},
+		{"https://parked.example", "200 非 JSON"},
+		{"https://api22-normal-alisg.mchost", "503"},
+	} {
+		if ok, why := c.probeAgentBase(context.Background(), tc.host); ok {
+			t.Errorf("%s 现在判活（why=%q）：坏候选会顶掉健康候选", tc.why, why)
+		} else {
+			t.Logf("probe(%s) → ok=false why=%q", tc.host, why)
+		}
 	}
 
-	// 断言 4：坏的首选分片被写进生效基址，健康的 api3 **一次都没被探**。
 	old := tncBootHosts
 	tncBootHosts = map[string][]string{auth.RealmCN: {"https://boot.test"}, auth.RealmIntl: {"https://boot.test"}}
 	t.Cleanup(func() { tncBootHosts = old })
@@ -190,16 +185,15 @@ func TestAuditDeltaProbeFailOpenOn5xxAnd200(t *testing.T) {
 	if err := c.DiscoverHosts(context.Background()); err != nil {
 		t.Fatalf("DiscoverHosts 不该失败（两区表都在固件里）: %v", err)
 	}
-	if got := c.agentBaseFor(nil); got != "https://api5-normal.mchost.guru" {
-		t.Fatalf("行为已变（疑似修好）：国服基址=%q —— 502 的候选不再被选中", got)
-	} else {
-		t.Logf("国服生效基址 = %q（502 的那台；健康候选 api3-normal 从未被探）", got)
+	// 502 的首选被判死后要继续往下探，选中 401 的 api3-normal。
+	if got := c.agentBaseFor(nil); got != "https://api3-normal.mchost.guru" {
+		t.Fatalf("国服基址=%q（期望跳过 502 的 api5、选中 api3-normal）", got)
 	}
-	if rt.calledSubstr("api3-normal.mchost.guru") {
-		t.Fatalf("行为已变：api3-normal 被探过了（说明遍历不再 break 在首个活候选）")
+	if !rt.calledSubstr("api3-normal.mchost.guru") {
+		t.Fatalf("api3-normal 没被探过：遍历仍在首个候选上 break")
 	}
-	// 好主机 api5 与坏主机 api3 的对照：修好后应当是 api3-normal 被选中。
-	t.Logf("调用序列 = %v", rt.calls)
+	t.Logf("国服生效基址 = %q（502 被跳过，401 的 api3-normal 被选中）；调用序列 = %v",
+		c.agentBaseFor(nil), rt.calls)
 }
 
 // ── 2. 发现预算：12s 总预算被两个 realm 串行共用，国服先跑 ────────────────────
@@ -242,10 +236,11 @@ func TestAuditDeltaDiscoveryBudgetStarvesLaterRealm(t *testing.T) {
 	}
 	t.Logf("预算耗尽后 err = %v", err)
 
-	if got := c.effectiveAgentBase(auth.RealmIntl); got != AgentHostIntl {
-		t.Fatalf("行为已变：国际已发现 %q —— 预算不再饿死后一半", got)
+	// 两区并行后：国服吃满预算也不该连累国际那一半 —— 它该在同一个预算里被发现。
+	if got := c.effectiveAgentBase(auth.RealmIntl); got != "https://api22-normal-alisg.mchost.guru" {
+		t.Fatalf("国际基址=%q（期望 api22-normal-alisg：国服挂住不该饿死国际）", got)
 	}
-	// 关键证据：国际那一半的表请求**带着一个已经死掉的 ctx**发出（或干脆没发出）。
+	// 关键证据：国际那一半的表请求有没有被拖到 ctx 死掉之后才发出。
 	if err := rt.deadAt("boot.test"); err != nil {
 		t.Logf("证据：国际的 boot 请求到达 transport 时 ctx 已死：%v", err)
 	} else if rt.calledSubstr("aid=677332") {
@@ -297,10 +292,12 @@ func TestAuditDeltaMaxNeedsBatchCatalog(t *testing.T) {
 		t.Fatalf("变体名没读出来: dev=%q max=%q", got[0].DevModelName, got[0].MaxModelName)
 	}
 	merged := mergeCatalog(got, map[string]catalogMeta{}, nil)
-	if merged[0].MaxAvailable() {
-		t.Fatalf("行为已变（疑似修好）：老视图独有条目现在能开 Max 了")
+	// 单视图自己声明的 max 必须带到 ContextMax（批量端点坏掉时只有这条路）。
+	if !merged[0].MaxAvailable() {
+		t.Fatalf("(a) 老视图独有条目开不了 Max：ContextMax=%d 名=%q（上游声明了 max=1000000）",
+			merged[0].ContextMax, merged[0].MaxModelName)
 	}
-	t.Logf("(a) 单视图声明 max=%d、给了 __max 名=%q，但 ContextMax=%d → MaxAvailable=%v（注释承诺落空）",
+	t.Logf("(a) 单视图声明 max=%d、__max 名=%q → ContextMax=%d MaxAvailable=%v",
 		1000000, merged[0].MaxModelName, merged[0].ContextMax, merged[0].MaxAvailable())
 
 	// (b) 批量端点 500：FetchModels 照样返回模型表，只是 Max 静默消失。
@@ -320,12 +317,15 @@ func TestAuditDeltaMaxNeedsBatchCatalog(t *testing.T) {
 	if infos[0].ContextWindow != 116000 {
 		t.Fatalf("ContextWindow=%d 期望 116000", infos[0].ContextWindow)
 	}
-	if infos[0].MaxAvailable() {
-		t.Fatalf("行为已变（疑似修好）：批量端点挂了仍报 Max 可用")
+	if !infos[0].MaxAvailable() {
+		t.Fatalf("(b) 批量端点 500 后 Max 也没了：context_max=%d 名=%q（上游声明了 max=1000000）",
+			infos[0].ContextMax, infos[0].MaxModelName)
 	}
-	t.Logf("(b) 批量端点 500 → 模型仍在（%d 条，context=%d）但 context_length_max 缺失、"+
-		"max_available 不报：上游明明声明了 max=1000000，被 pickOfficialModels 丢掉且无日志",
-		len(infos), infos[0].ContextWindow)
+	if infos[0].ContextMax != 1000000 {
+		t.Fatalf("(b) ContextMax=%d 期望 1000000（单视图的 max 口径）", infos[0].ContextMax)
+	}
+	t.Logf("(b) 批量端点 500 → 模型仍在（%d 条，context=%d/%d）且 Max 仍可用（单视图口径）",
+		len(infos), infos[0].ContextWindow, infos[0].ContextMax)
 }
 
 // ── 4. agent_host 热改：新加的写侧与请求读侧无锁并发（-race 报竞态）────────────
@@ -395,23 +395,25 @@ func TestAuditDeltaBonusQuotaIgnored(t *testing.T) {
 	if err != nil {
 		t.Fatalf("err=%v", err)
 	}
-	if u.LimitUSD != 1 || u.UsedUSD != 0.5 {
-		t.Fatalf("行为已变（疑似修好）：bonus 被算进去了 limit=%v used=%v", u.LimitUSD, u.UsedUSD)
+	// basic(1+0) + bonus(5+3) = 9；used = basic(0.5+0) + bonus(0.25+1.0) = 1.75。
+	if u.LimitUSD != 9 || u.UsedUSD != 1.75 {
+		t.Fatalf("bonus 没算进额度：limit=%v used=%v（期望 9 / 1.75）", u.LimitUSD, u.UsedUSD)
 	}
-	t.Logf("上游给了 bonus_limit=5+3、bonus_used=0.25+1.0；面板看到的是 limit=%v used=%v（赠送全丢）",
+	t.Logf("上游给了 bonus_limit=5+3、bonus_used=0.25+1.0；面板看到 limit=%v used=%v（赠送已计入）",
 		u.LimitUSD, u.UsedUSD)
 
 	packs, pu, err := c.BalancePackages(audIntlAuth())
 	if err != nil {
 		t.Fatalf("err=%v", err)
 	}
-	if len(packs) != 1 || packs[0].Name != "Free plan" {
-		t.Fatalf("行为已变：包列表=%d %v（期望仍是「只有有 basic 面额的那一个」）", len(packs), packs)
+	// 「Bonus only」现在有面额了，不再被当作「订阅权益那类」跳过；逐包汇总必须与上面同口径。
+	if len(packs) != 2 {
+		t.Fatalf("包列表=%d %v（期望 2 个：Bonus only 有面额了）", len(packs), packs)
 	}
-	if pu.LimitUSD != 1 {
-		t.Fatalf("汇总口径变了: %v", pu.LimitUSD)
+	if pu.LimitUSD != 9 || pu.UsedUSD != 1.75 {
+		t.Fatalf("逐包汇总与 UserEntUsageDetail 不同口径: limit=%v used=%v（期望 9 / 1.75）", pu.LimitUSD, pu.UsedUSD)
 	}
-	t.Logf("逐包视角：%d 个包（「Bonus only」那条被 skip），汇总 limit=%v", len(packs), pu.LimitUSD)
+	t.Logf("逐包视角：%d 个包，汇总 limit=%v used=%v（两处口径一致）", len(packs), pu.LimitUSD, pu.UsedUSD)
 }
 
 // ── 6. 到期时间断言是对齐「当下的 now」：新套件里的绝对时刻会自己过期 ───────────

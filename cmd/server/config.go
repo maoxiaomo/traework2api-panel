@@ -17,6 +17,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
 	"os"
 	"path/filepath"
 	"slices"
@@ -344,6 +345,16 @@ func parseHours(v string) ([]int, error) {
 		out = append(out, n)
 	}
 	return out, nil
+}
+
+// bindsAllInterfaces listen 是否绑到所有网卡（空主机 / 0.0.0.0 / ::）。
+// 解析失败时按最坏情况算：宁可多提示一句，也不让「本机免鉴权」的说明误导运维。
+func bindsAllInterfaces(addr string) bool {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return true
+	}
+	return host == "" || host == "0.0.0.0" || host == "::"
 }
 
 // normalize 补齐缺省、解析时长、校验范围。非法值一律 fail fast（启动/保存即报错），

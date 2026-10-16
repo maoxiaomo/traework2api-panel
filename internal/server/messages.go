@@ -695,8 +695,8 @@ type anthState struct {
 	thinkIdx        int
 	textOpen        bool
 	textIdx, next   int
-	tools           map[int]*anthTool
-	toolOrder       []int
+	tools           map[int][]*anthTool // 同一 index 可能有多次并行调用（靠 id 区分）
+	toolList        []*anthTool         // 按首次出现的顺序，收尾时逐个下发
 	usage           map[string]any
 }
 
@@ -959,24 +959,47 @@ func (w *messagesWriter) ensureText() error {
 
 func (w *messagesWriter) onTools(tcs []any) error {
 	if w.x.tools == nil {
-		w.x.tools = map[int]*anthTool{}
+		w.x.tools = map[int][]*anthTool{}
 	}
 	for _, tci := range tcs {
 		tc, _ := tci.(map[string]any)
 		if tc == nil {
 			continue
 		}
-		idx := 0
+		idx, id := 0, asString(tc["id"])
 		if v, ok := tc["index"].(float64); ok {
 			idx = int(v)
 		}
-		acc, ok := w.x.tools[idx]
-		if !ok {
-			acc = &anthTool{idx: idx}
-			w.x.tools[idx] = acc
-			w.x.toolOrder = append(w.x.toolOrder, idx)
+		// 同一个 index 下出现新 id = 上游在并发下发两次调用（OpenAI 语义里 index 该递增，
+		// 但有的实现固定 index:0、只靠 id 区分）：不能再合并成一次，另起一个累积器。
+		// 例外：该 index 最后一个累积器还是「无名无 id」的（上游把 name 放在后面的帧里），
+		// 就地认领它 —— 否则那条「先攒参数、等名字到了再宣告」的兜底会被拆成两次调用。
+		// 不带 id 的增量帧是上一次调用的续写，接在该 index 最新的累积器上。
+		list := w.x.tools[idx]
+		last := (*anthTool)(nil)
+		if len(list) > 0 {
+			last = list[len(list)-1]
 		}
-		if id := asString(tc["id"]); id != "" {
+		var acc *anthTool
+		if id != "" {
+			for _, a := range list {
+				if a.id == id {
+					acc = a
+					break
+				}
+			}
+			if acc == nil && last != nil && last.id == "" && last.name == "" {
+				acc = last
+			}
+		} else if last != nil {
+			acc = last
+		}
+		if acc == nil {
+			acc = &anthTool{idx: idx}
+			w.x.tools[idx] = append(list, acc)
+			w.x.toolList = append(w.x.toolList, acc)
+		}
+		if id != "" {
 			acc.id = id
 		}
 		fn, _ := tc["function"].(map[string]any)
@@ -1053,8 +1076,7 @@ func (w *messagesWriter) closeAndStop() error {
 		}
 		w.x.textOpen = false
 	}
-	for _, idx := range w.x.toolOrder {
-		acc := w.x.tools[idx]
+	for _, acc := range w.x.toolList {
 		if !acc.opened {
 			if err := w.openTool(acc); err != nil {
 				return err

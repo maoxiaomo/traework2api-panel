@@ -192,24 +192,32 @@ func TestAuditOverviewCannotDistinguishLoopbackFromAllInterfaces(t *testing.T) {
 	}
 	sort.Strings(keys)
 	t.Logf("overview 字段: %s", strings.Join(keys, ", "))
-	t.Logf("auth_required=%v（app.js 由它单独决定「已启用密钥鉴权 / 本机免鉴权」）", body["auth_required"])
+	t.Logf("auth_required=%v auth_scope=%v", body["auth_required"], body["auth_scope"])
 	if body["auth_required"] != false {
-		t.Fatalf("期望复现「空密钥 → 本机免鉴权」：auth_required=%v", body["auth_required"])
+		t.Fatalf("期望复现「空密钥 → 免密钥访问」：auth_required=%v", body["auth_required"])
 	}
-	for k := range body {
-		if strings.Contains(k, "listen") || strings.Contains(k, "addr") || strings.Contains(k, "bind") {
-			t.Fatalf("overview 里出现了绑定地址字段 %q —— 那这条缺陷已被修掉", k)
-		}
+	// 没有 BindAll（测试直连 New，不知道 listen）时必须是 loopback：不能凭空说「对全网开放」。
+	if body["auth_scope"] != "loopback" {
+		t.Fatalf("空密钥 + 未告知绑定范围时应报 loopback，实得 %v", body["auth_scope"])
 	}
 	app, err := os.ReadFile("app.js")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !regexp.MustCompile(`auth_required\s*\?\s*'已启用密钥鉴权'\s*:\s*'本机免鉴权'`).Match(app) {
-		t.Fatal("app.js 里「本机免鉴权」的判据变了，这条断言要跟着改")
+	if !regexp.MustCompile(`d\.auth_scope === 'open'`).Match(app) {
+		t.Fatal("app.js 的免鉴权提示没有按 auth_scope 分叉：绑全接口时仍会显示「本机免鉴权」")
 	}
-	// 默认配置：listen=":7864" 是 0.0.0.0:7864（cmd/server/config.go:132 + normalize 的补 ":" 分支）
-	t.Logf("→ 面板在「:7864（全接口）+ 空密钥」时照样显示「本机免鉴权」")
+	// 绑全接口这一支单独验一次：BindAll 为真时必须报 open（"本机免鉴权" 的说明此时是错的）。
+	p2 := New(Config{Pool: pool.New(""), Version: "audit", BindAll: true})
+	rec2 := auditPanelReq(p2, "GET", "/panel/api/overview", "", nil)
+	var body2 map[string]any
+	if err := json.Unmarshal(rec2.Body.Bytes(), &body2); err != nil {
+		t.Fatal(err)
+	}
+	if body2["auth_scope"] != "open" {
+		t.Fatalf("空密钥 + 绑全接口应报 open，实得 %v", body2["auth_scope"])
+	}
+	t.Logf("→ 绑全接口时会显示「免密钥访问（已绑全接口）」，不再谎称「本机免鉴权」")
 }
 
 // ---------------------------------------------------------------------------

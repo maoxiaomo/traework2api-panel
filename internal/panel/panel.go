@@ -34,9 +34,11 @@ type Config struct {
 	AuthDir   string
 	APIKey    string
 	Version   string
-	Logs      *Ring
-	Models    func() []map[string]any
-	Usage     *usage.Recorder // 可选，用量台账
+	// BindAll listen 绑了所有网卡（空密钥时面板对全网开放，不只是本机）——app.js 的提示要分开说。
+	BindAll bool
+	Logs    *Ring
+	Models  func() []map[string]any
+	Usage   *usage.Recorder // 可选，用量台账
 	// RequestLog 可选，请求级指标/归档（运行日志页的「请求记录」）。nil = 该接口 501。
 	RequestLog *reqlog.Recorder
 	ConfigPath string
@@ -277,10 +279,20 @@ func (p *Panel) writeOverview(w http.ResponseWriter, extra map[string]any) {
 			hostInfo["agent_host_discovered_at"] = at.Format(time.RFC3339)
 		}
 	}
+	// key=有密钥；loopback=空密钥且只绑本机；open=空密钥但绑了所有网卡（面板"本机免鉴权"
+	// 的说明此时是错的，前端按这个字段分开提示）。
+	scope := "key"
+	if p.key() == "" {
+		scope = "loopback"
+		if p.cfg.BindAll {
+			scope = "open"
+		}
+	}
 	body := map[string]any{
 		"version":       p.cfg.Version,
 		"uptime_sec":    int(time.Since(p.started).Seconds()),
 		"auth_required": p.key() != "",
+		"auth_scope":    scope,
 		"total":         len(list),
 		"healthy":       healthy,
 		"cooling":       cooling,

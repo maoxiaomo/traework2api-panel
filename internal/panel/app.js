@@ -348,7 +348,15 @@ async function loadOverview(quiet) {
     $('navVer').textContent = 'v' + d.version;
     $('navState').textContent = d.healthy > 0 ? '服务正常' : (d.total ? '无可用账号' : '待添加账号');
     $('navPulse').className = 'pulse' + (d.healthy > 0 ? '' : (d.total ? ' warn' : ' bad'));
-    $('accNote').textContent = d.auth_required ? '已启用密钥鉴权' : '本机免鉴权';
+    // 空密钥 + 绑全接口 = 面板对全网开放（不是「本机免鉴权」），这里必须分开说。
+    $('accNote').textContent = d.auth_required
+      ? '已启用密钥鉴权'
+      : (d.auth_scope === 'open' ? '⚠ 免密钥访问（已绑全接口）' : '本机免鉴权');
+    // 上游基址现状（overview 的 agent_host*）：上游换域名时这里是第一现场，不必翻 [domains] 日志行。
+    $('agHostNote').textContent = d.agent_host_cn
+      ? '基址 ' + d.agent_host_cn + ' / ' + (d.agent_host_intl || '—') +
+        '（' + (d.agent_host_source || '?') + (d.agent_host_discovered_at ? ' ' + d.agent_host_discovered_at : '') + '）'
+      : '';
     const up = Math.floor(d.uptime_sec || 0);
     $('subMeta').textContent = '运行 ' + (up >= 86400 ? Math.floor(up / 86400) + ' 天 ' : '') +
       Math.floor(up % 86400 / 3600) + ' 时 ' + Math.floor(up % 3600 / 60) + ' 分';
@@ -1176,11 +1184,16 @@ const CFG_MAP = {
   header_timeout_seconds: ['upstream', 'header_timeout_seconds'],
   idle_timeout_seconds: ['upstream', 'idle_timeout_seconds'],
   user_agent: ['upstream', 'user_agent'], client_version: ['upstream', 'client_version'],
+  // 域名自动跟进 / 基址钉死 / Max 出站面（host_discovery* 改了需重启，见 RestartFields）
+  host_discovery: ['upstream', 'host_discovery'], host_discovery_hours: ['upstream', 'host_discovery_hours'],
+  agent_host: ['upstream', 'agent_host'], agent_host_intl: ['upstream', 'agent_host_intl'],
+  max_function: ['upstream', 'max_function'],
 };
 // ARRAY_FIELDS 逗号分隔提交成 JSON 数组（后端是 []int）；BOOL_FIELDS 用 select 的
 // "true"/"false" 提交成 JSON 布尔——直接把字符串塞进 json 会让后端 Unmarshal 失败。
 const ARRAY_FIELDS = ['checkin_hours', 'keepalive_hours'];
-const BOOL_FIELDS = ['checkin_enabled', 'keepalive_enabled', 'balance_refresh_enabled', 'session_sticky_enabled'];
+const BOOL_FIELDS = ['checkin_enabled', 'keepalive_enabled', 'balance_refresh_enabled', 'session_sticky_enabled',
+  'host_discovery'];
 function dig(obj, path) { return path.reduce((o, k) => (o == null ? undefined : o[k]), obj); }
 function put(obj, path, val) {
   let o = obj;

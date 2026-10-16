@@ -25,6 +25,7 @@
 package upstream
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -36,6 +37,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"traework2api/internal/auth"
@@ -71,7 +73,7 @@ const (
 	domainAppName     = "Trae"
 	domainCronetVer   = "a61b3479_2026-08-04"
 	domainTTNetVer    = "4.2.243.20-trae"
-	domainProbeBudget = 12 * time.Second // 单次发现的总预算（含所有候选探活）
+	domainProbeBudget = 12 * time.Second // 单次发现的总预算（两区并行共用，含候选探活）
 	domainHTTPTimeout = 8 * time.Second
 )
 
@@ -191,10 +193,18 @@ func (c *Client) probeAgentBase(ctx context.Context, base string) (bool, string)
 	if err != nil {
 		return false, err.Error()
 	}
-	io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<16))
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<16))
 	resp.Body.Close()
-	if resp.StatusCode == http.StatusNotFound {
+	switch {
+	case resp.StatusCode == http.StatusNotFound:
 		return false, "http 404"
+	case resp.StatusCode >= 500:
+		// 网关/机房坏了不等于「这台在路由」：502/503 的候选必须如实判死，否则它会顶掉
+		// 后面真正健康的候选（DiscoverHosts 在首个「活」候选上就 break）。
+		return false, fmt.Sprintf("http %d", resp.StatusCode)
+	case resp.StatusCode < 300 && !json.Valid(bytes.TrimSpace(body)):
+		// 200 却不给 JSON = 停车场/边缘 HTML 页，不是 Trae 的分片。
+		return false, fmt.Sprintf("http %d 非 JSON 响应", resp.StatusCode)
 	}
 	return true, fmt.Sprintf("http %d", resp.StatusCode)
 }
@@ -205,35 +215,61 @@ func (c *Client) DiscoverHosts(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, domainProbeBudget)
 	defer cancel()
 
+	type realmResult struct {
+		realm, src string
+		hosts      []string
+		picked     string
+		err        error
+	}
+	realms := []string{auth.RealmCN, auth.RealmIntl}
+	results := make([]realmResult, len(realms))
+	var wg sync.WaitGroup
+	// 两区并行，共用一份预算。串行时前一个 realm 最慢能吃满整个额度（单 realm 最坏
+	// 3 个 boot × 8s + 候选 × 8s 就超过一份），后一个 realm 就拿着已死的 ctx 发请求 →
+	// 那一区永远发现不出来，而两区的发现过程互不依赖。
+	for i, realm := range realms {
+		wg.Add(1)
+		go func(i int, realm string) {
+			defer wg.Done()
+			r := realmResult{realm: realm}
+			r.hosts, r.src, r.err = c.fetchDispatch(ctx, realm)
+			if r.err != nil {
+				results[i] = r
+				return
+			}
+			for _, h := range r.hosts {
+				ok, why := c.probeAgentBase(ctx, "https://"+h)
+				if !ok {
+					continue
+				}
+				r.picked = "https://" + h
+				log.Printf("[domains] %s 候选 %s 探活通过（%s）", realm, h, why)
+				break
+			}
+			results[i] = r
+		}(i, realm)
+	}
+	wg.Wait()
+
+	// 写回与日志放在并行段之后：两区各自的结果一个人处理，日志顺序稳定。
 	var firstErr error
 	changed := false
-	for _, realm := range []string{auth.RealmCN, auth.RealmIntl} {
-		hosts, src, err := c.fetchDispatch(ctx, realm)
-		if err != nil {
+	for _, r := range results {
+		if r.err != nil {
 			if firstErr == nil {
-				firstErr = err
+				firstErr = r.err
 			}
-			log.Printf("[domains] %s 域名表获取失败，沿用现有基址 %s: %v", realm, c.effectiveAgentBase(realm), err)
+			log.Printf("[domains] %s 域名表获取失败，沿用现有基址 %s: %v", r.realm, c.effectiveAgentBase(r.realm), r.err)
 			continue
 		}
-		picked := ""
-		for _, h := range hosts {
-			ok, why := c.probeAgentBase(ctx, "https://"+h)
-			if !ok {
-				continue
-			}
-			picked = "https://" + h
-			log.Printf("[domains] %s 候选 %s 探活通过（%s）", realm, h, why)
-			break
-		}
-		if picked == "" {
+		if r.picked == "" {
 			log.Printf("[domains] %s 的 %d 个候选全部不可用，沿用现有基址 %s（来源 %s）",
-				realm, len(hosts), c.effectiveAgentBase(realm), src)
+				r.realm, len(r.hosts), c.effectiveAgentBase(r.realm), r.src)
 			continue
 		}
-		if old := c.setDiscovered(realm, picked); old != picked {
+		if old := c.setDiscovered(r.realm, r.picked); old != r.picked {
 			changed = true
-			log.Printf("[domains] %s agent 基址 %s → %s（来自 %s，候选 %v）", realm, old, picked, src, hosts)
+			log.Printf("[domains] %s agent 基址 %s → %s（来自 %s，候选 %v）", r.realm, old, r.picked, r.src, r.hosts)
 		}
 	}
 	if changed {

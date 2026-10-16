@@ -670,6 +670,7 @@ legend { font-size: 12px; color: var(--ink-3); font-weight: 600; padding-bottom:
         <header>
           <h3>账号池</h3>
           <span class="grow"></span>
+          <span class="note" id="agHostNote" title="当前生效的 agent 基址与来源（自动发现 > 显式配置 > 内置常量）"></span>
           <span class="note" id="accNote"></span>
           <button class="xs" id="btnCheckinAll">全部签到</button>
           <button class="xs" id="btnCheckinState" title="只读查询各账号今天签了没（不领取、不吃额度）">签到状态</button>
@@ -894,6 +895,25 @@ legend { font-size: 12px; color: var(--ink-3); font-weight: 600; padding-bottom:
               <label class="fld"><span class="lb">客户端版本覆盖</span>
                 <input name="client_version" placeholder="（留空用内置）">
                 <span class="hint">出站 UA 与 X-Ide-Version</span></label>
+            </div>
+            <div class="grid3">
+              <label class="fld"><span class="lb">域名自动跟进</span>
+                <select name="host_discovery"><option value="true">开（按 TNC 下发跟进基址）</option><option value="false">关（只用下面钉死的/内置基址）</option></select>
+                <span class="hint">改了需重启；关掉后上游换域名要手改基址</span></label>
+              <label class="fld"><span class="lb">跟进周期（小时）</span>
+                <input name="host_discovery_hours" type="number" min="1" placeholder="6">
+                <span class="hint">改了需重启</span></label>
+              <label class="fld"><span class="lb">Max 出站给哪个面</span>
+                <input name="max_function" placeholder="chat_v3">
+                <span class="hint">开 Max 上下文时出站 function；留空按 chat_v3</span></label>
+            </div>
+            <div class="grid3">
+              <label class="fld"><span class="lb">国服基址钉死</span>
+                <input name="agent_host" placeholder="https://api5-normal.mchost.guru">
+                <span class="hint">留空 = 自动发现；填了就优先用它</span></label>
+              <label class="fld"><span class="lb">国际基址钉死</span>
+                <input name="agent_host_intl" placeholder="https://api22-normal-alisg.mchost.guru">
+                <span class="hint">留空 = 自动发现</span></label>
             </div>
             <div class="hint">以下 workbuddy2api 的配置段在 trae 上游没有对应能力，故未提供：活动任务（travel/activity/blackcat）、global 域路由、upstash、黑名单指纹脱敏、成本分层探索。</div>
           </div>

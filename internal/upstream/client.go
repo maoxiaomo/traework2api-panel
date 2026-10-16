@@ -606,7 +606,10 @@ func pickOfficialModels(list []paramConfig, a *auth.Auth, function string) []Mod
 			ID:            cfg.ConfigName,
 			Name:          cfg.DisplayConfig.DisplayName,
 			ContextWindow: cfg.ContextWindowTokens.Dev,
-			Function:      function,
+			// 单视图自己就声明了 max：批量端点坏掉时会退到这条路径（FetchModels 里批量
+			// 失败只回退不报错），不带过来就等于「上游声明了 max、我们这边 MaxAvailable 恒 false」。
+			ContextMax: cfg.ContextWindowTokens.Max,
+			Function:   function,
 			// 单 function 视图也给变体名：只在老视图里出现的模型也要能开 Max。
 			// 不过这条路取的变体名可能不准（老视图的 model_name 与 ID 对不上时取空），
 			// 取空就是「没有 Max」——宁可少一个开关，不给一个发出去没用的名字。
@@ -951,6 +954,10 @@ func (c *Client) FetchModels(a *auth.Auth) ([]ModelInfo, error) {
 	// 条目标记出来、带上权威倍率与上下文双口径。拉不到就退回单视图结果（不让新端点成为单点）。
 	if cat, err := c.fetchBatchCatalog(a); err == nil {
 		out = mergeCatalog(out, cat, a)
+	} else {
+		// 静默回退过一次踩坑：批量端点 500 时 Max 与权威倍率一起消失，日志里一个字都没有，
+		// 面板上只看得到「某模型没有 Max」。回退照旧，但必须留痕。
+		log.Printf("[models] 批量视图拉取失败，退回单 function 视图（权威倍率/可见性/部分上下文口径拿不到）: %v", err)
 	}
 	return out, nil
 }
@@ -1218,8 +1225,10 @@ func (c *Client) UserEntUsageDetail(a *auth.Auth) (EntUsage, error) {
 		var limit float64
 		var used float64
 		if u.Unit == UnitUSD {
-			limit = p.EntitlementBaseInfo.Quota.BasicUsageLimit
-			used = p.Usage.BasicUsageAmount
+			// 赠送额度与基础额度是相加关系（实测 bonus_limit 可以大于 basic_limit），
+			// 只读 basic 会把「Bonus only」这类包整条漏掉（limit=0 → continue）。
+			limit = p.EntitlementBaseInfo.Quota.BasicUsageLimit + p.EntitlementBaseInfo.Quota.BonusUsageLimit
+			used = p.Usage.BasicUsageAmount + p.Usage.BonusUsageAmount
 			if limit <= 0 {
 				continue
 			}
@@ -1296,12 +1305,12 @@ func earlier(cur, v int64) int64 {
 type CreditPackage struct {
 	Name string `json:"name"` // display_desc（老用户福利 / 每月登录赠送 / 签到奖励 / Free plan）
 	// Group 分组名（用户福利 / 每月登录积分 / 每日签到），display_desc 缺失时的兜底展示名。
-	Group     string  `json:"group,omitempty"`
-	GroupType int     `json:"group_type,omitempty"`
-	Unit      string  `json:"unit"`   // UnitCredit | UnitUSD
-	Remain    int64   `json:"remain"` // credits_limit - credits_amount（Unit=credit）
-	Used      int64   `json:"used"`
-	Size      int64   `json:"size"` // credits_limit
+	Group     string `json:"group,omitempty"`
+	GroupType int    `json:"group_type,omitempty"`
+	Unit      string `json:"unit"`   // UnitCredit | UnitUSD
+	Remain    int64  `json:"remain"` // credits_limit - credits_amount（Unit=credit）
+	Used      int64  `json:"used"`
+	Size      int64  `json:"size"` // credits_limit
 	// 美元口径（Unit=usd）。实测 Free plan：limit=1、used=0.00059 —— 走 int64 会全是 0。
 	RemainUSD float64 `json:"remain_usd,omitempty"`
 	UsedUSD   float64 `json:"used_usd,omitempty"`
@@ -1341,7 +1350,9 @@ func (c *Client) BalancePackages(a *auth.Auth) ([]CreditPackage, EntUsage, error
 			Unit: u.Unit, Expire: e, Start: p.EntitlementBaseInfo.StartTime, EntID: id,
 		}
 		if u.Unit == UnitUSD {
-			limit, used := p.EntitlementBaseInfo.Quota.BasicUsageLimit, p.Usage.BasicUsageAmount
+			// 与 UserEntUsageDetail 同口径：basic + bonus 才是这个包的总面额/总用量。
+			limit := p.EntitlementBaseInfo.Quota.BasicUsageLimit + p.EntitlementBaseInfo.Quota.BonusUsageLimit
+			used := p.Usage.BasicUsageAmount + p.Usage.BonusUsageAmount
 			if limit <= 0 {
 				continue // 没有面额的包（订阅权益那类）不算额度包
 			}
