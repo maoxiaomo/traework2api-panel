@@ -291,14 +291,16 @@ func TestAuditUserEntUsageNegativeRemain(t *testing.T) {
 	}
 	t.Logf("同一份上游数据：UserEntUsage remain=%d total=%d / CreditPackages remain=%d size=%d (%d 包)",
 		remain, total, sumRemain, sumSize, len(pkgs))
-	if remain != -50 {
-		t.Fatalf("行为已变：UserEntUsage remain=%d（夹 0 之后应为 0）—— 改写本条", remain)
+	// 上游给的 used(150) > limit(100)：两条路都必须夹 0，不能报剩余 -50
+	// （否则超支的包会把别的包的余额抵掉，选号/面板都跟着错）。
+	if remain != 0 {
+		t.Fatalf("UserEntUsage 该夹 0，实得 remain=%d", remain)
 	}
 	if sumRemain != 0 {
-		t.Fatalf("CreditPackages 一侧已不再夹 0：%d", sumRemain)
+		t.Fatalf("CreditPackages remain=%d 该夹 0", sumRemain)
 	}
-	if remain >= 0 {
-		t.Fatalf("没有复现出负余额：%d", remain)
+	if total != 100 || sumSize != 100 {
+		t.Fatalf("总额口径应一致：total=%d size=%d", total, sumSize)
 	}
 }
 
@@ -314,8 +316,9 @@ func TestAuditIdentityOverrideNotAppliedIntl(t *testing.T) {
 	if cn != "9.9.9" {
 		t.Fatalf("国内版没吃到覆盖：%q", cn)
 	}
-	if intl != IdeVersionIntl || intlCode != IdeVersionCodeIntl {
-		t.Fatalf("行为已变：国际版现在吃覆盖 (%q,%q) —— 改写本条", intl, intlCode)
+	// 覆盖是运维显式钉死的：国际版也要吃，否则「设了覆盖但国际流量还是老版本」没人看得出。
+	if intl != "9.9.9" || intlCode != IdeVersionCodeIntl {
+		t.Fatalf("国际版没吃到版本覆盖或动了版本码：(%q,%q)", intl, intlCode)
 	}
 
 	var body string
@@ -331,11 +334,9 @@ func TestAuditIdentityOverrideNotAppliedIntl(t *testing.T) {
 		t.Fatalf("GetUserInfo: %v", err)
 	}
 	t.Logf("GetUserInfo 请求体=%s", body)
-	if strings.Contains(body, "9.9.9") {
-		t.Fatalf("行为已变：GetUserInfo 现在带上了覆盖版本 —— 改写本条")
-	}
-	if !strings.Contains(body, IdeVersion) {
-		t.Fatalf("GetUserInfo 请求体既没有覆盖也没有常量：%s", body)
+	// 请求体里必须带上覆盖版本（国际版同样生效）。
+	if !strings.Contains(body, "9.9.9") {
+		t.Fatalf("GetUserInfo 请求体没带上覆盖版本: %s", body)
 	}
 }
 
@@ -393,13 +394,11 @@ func TestAuditToolsNonMapDropIsSilent(t *testing.T) {
 	t.Logf("出站 body=%s", out)
 	t.Logf("剔除日志=%q", buf.String())
 	if strings.Contains(string(out), `"tools"`) {
-		t.Fatalf("行为已变：非 map 工具条目现在被保留了 —— 改写本条断言：%s", out)
+		t.Fatalf("非 map 工具条目该被剔除（上游反序列化不了）: %s", out)
 	}
-	if !strings.Contains(string(out), `"tool_choice":"web_search"`) {
-		t.Fatalf("行为已变：tool_choice 也被清掉了 —— 改写本条断言：%s", out)
-	}
-	if buf.Len() != 0 {
-		t.Fatalf("行为已变：剔除已留痕（%q），删除本条断言", buf.String())
+	// 剔除必须留痕：静默丢 = 客户端以为自己还能调这个工具。
+	if !strings.Contains(buf.String(), "web_search") || !strings.Contains(buf.String(), "剔除") {
+		t.Fatalf("剔除非 map 条目没留痕: %q", buf.String())
 	}
 }
 

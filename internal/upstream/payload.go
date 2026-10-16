@@ -185,6 +185,9 @@ func normalizeTools(obj map[string]any) {
 	for _, item := range list {
 		t, ok := item.(map[string]any)
 		if !ok {
+			// 非 map 条目（客户端把工具名当字符串塞进 tools）同样要留痕：
+			// 静默丢 = 客户端以为自己能调这个工具。
+			dropped = append(dropped, "(非对象条目: "+truncate(asString(item), 40)+")")
 			continue
 		}
 		fn, ok := t["function"].(map[string]any)

@@ -965,12 +965,6 @@ func (w *responsesWriter) flushJSON() {
 	_, _ = w.ResponseWriter.Write(raw)
 }
 
-func (w *responsesWriter) emitJSONErrorAsFailed() error {
-	var obj map[string]any
-	_ = json.Unmarshal(w.body, &obj)
-	return w.emitFailed(obj["error"])
-}
-
 func (w *responsesWriter) handleFrame(frame string) error {
 	// SSE 注释帧（保活，`: keepalive`）：原样透传。吞掉它等于把网关的空闲保活一起吃掉，
 	// 长思考期下游重新变静默，白加。客户端按 SSE 规范忽略注释，转发没有副作用。

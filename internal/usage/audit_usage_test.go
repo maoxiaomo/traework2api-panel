@@ -70,12 +70,12 @@ func TestAuditFlushFailureStopsRetryUntilNextAdd(t *testing.T) {
 	}
 }
 
-// TestAuditCorruptLedgerIsSilentlyOverwritten：usage.json 解析失败时 New 只在日志里写一行
+// TestAuditCorruptLedgerIsBackedUpNotOverwritten：usage.json 解析失败时 New 只在日志里写一行
 // 「从零开始」（usage.go:98-100），**不向调用方返回错误** —— main 照样启动、面板照样开机；
 // 紧接着的第一次落盘（30s 后或面板点刷新）就把这份坏文件**覆盖**成空台账，且不写任何备份
 // （flush 只用 path+".tmp" 原子替换，usage.go:325-332）。结果是整段用量/积分估算历史不可恢复，
 // 唯一线索是启动日志里那一行。
-func TestAuditCorruptLedgerIsSilentlyOverwritten(t *testing.T) {
+func TestAuditCorruptLedgerIsBackedUpNotOverwritten(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "usage.json")
 	// 半截 JSON：掉电 / 坏扇区 / 被截断的写入都可能留成这样。
@@ -86,7 +86,7 @@ func TestAuditCorruptLedgerIsSilentlyOverwritten(t *testing.T) {
 
 	r := New(path) // 拿不到任何错误信号
 	snap := r.Snapshot(0, nil)
-	t.Logf("坏台账读入结果：桶=%d requests=%d（New 不返回错误，调用方无从得知）", snap.Buckets, snap.Totals.Requests)
+	t.Logf("坏台账读入结果：桶=%d requests=%d（从零开始；坏文件已备份+日志）", snap.Buckets, snap.Totals.Requests)
 	if snap.Buckets != 0 || snap.Totals.Requests != 0 {
 		t.Fatalf("期望复现「解析失败 → 从零开始」：桶=%d", snap.Buckets)
 	}

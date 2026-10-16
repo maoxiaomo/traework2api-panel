@@ -31,6 +31,13 @@ func currentUA() string {
 	return "Trae/" + currentVerLocked()
 }
 
+// identOverrideVersion 运维显式钉死的 IDE 版本（空 = 没设）。国际版也要吃这个覆盖。
+func identOverrideVersion() string {
+	identityMu.RLock()
+	defer identityMu.RUnlock()
+	return verOverride
+}
+
 // currentIdeVersion 出站 X-Ide-Version：显式覆盖优先，否则内置 IdeVersion。
 func currentIdeVersion() string {
 	identityMu.RLock()

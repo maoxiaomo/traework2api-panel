@@ -61,16 +61,16 @@ func TestAuditEmptyPromptFileAcceptedAsCustomPrompt(t *testing.T) {
 	t.Log("空/全空白提示词文件在加载时都被拒")
 }
 
-// TestAuditNegativeMaxInFlightBecomesUnlimited：normalize 把 max_in_flight 的非法负值
+// TestAuditNegativeMaxInFlightFallsBackToDefault：normalize 把 max_in_flight 的非法负值
 // **静默夹成 0**（config.go:378-380），而 pool 的判据是 `MaxInFlight > 0` 才限流
 // （internal/pool/pool.go:383/528/545）→ 0 = **不限在途**。于是「非法值」落到风险最大的那一档：
 // 单账号并发上限从默认 3 变成无限（写配置手抖、env 传 -1 都会命中），且没有任何日志或报错。
 // 合法值 0 本来就表示「不限」，非法值却得到同一个语义 —— 越非法越宽松。
-func TestAuditNegativeMaxInFlightBecomesUnlimited(t *testing.T) {
+func TestAuditNegativeMaxInFlightFallsBackToDefault(t *testing.T) {
 	fp := auditWriteConfig(t, map[string]any{"pool": map[string]any{"max_in_flight": -5}})
 	c, err := Load(fp)
 	if err != nil {
-		t.Fatalf("期望复现「负值被接受」：err=%v", err)
+		t.Fatalf("负值应被接受但回退默认（只记日志）：err=%v", err)
 	}
 	t.Logf("配置文件 pool.max_in_flight=-5 → 生效值 %d（默认是 %d）",
 		c.Pool.MaxInFlight, Default().Pool.MaxInFlight)

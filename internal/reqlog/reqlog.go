@@ -11,6 +11,7 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"sort"
@@ -300,6 +301,13 @@ func (w *archiveWriter) enqueue(e Event) {
 		return
 	}
 	select {
+	case <-w.stop:
+		// 已关停（Close 之后还有请求在收尾）：写不进去了，如实计 dropped。
+		w.dropped.Add(1)
+		return
+	default:
+	}
+	select {
 	case w.ch <- e:
 	default:
 		w.dropped.Add(1)
@@ -547,7 +555,11 @@ func (w *archiveWriter) read(limit int, filter Filter) ([]Event, error) {
 	for _, file := range files {
 		rows, err := readFile(file.path, filter)
 		if err != nil {
-			return out, err
+			// 单个分片读不了（被清理/权限/半截行）不该让整个「请求记录」页 500：
+			// 跳过它、把原因留在 stats.last_error 里，其余分片照读。
+			w.setErr(err)
+			log.Printf("[reqlog] 归档分片 %s 读取失败，跳过: %v", file.path, err)
+			continue
 		}
 		out = append(out, rows...)
 	}

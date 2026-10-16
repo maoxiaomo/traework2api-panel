@@ -216,7 +216,7 @@ func TestAuditNextFireSkipsSlotAcrossDST(t *testing.T) {
 	now := time.Date(2026, 3, 7, 0, 30, 0, 0, ny) // 3/8 02:00 EST → 03:00 EDT
 
 	fired := nextFire(now, hours)  // 3/7 03:00 EST —— 正常触发
-	next := nextFire(fired, hours) // fired.Add(24h) → 3/8 04:00 EDT
+	next := nextFire(fired, hours) // 按日历日推进 → 3/8 03:00 EDT（03:00 那天存在）
 	next2 := nextFire(next, hours) // → 3/9 03:00 EDT
 
 	t.Logf("fired=%v(h=%d) next=%v(h=%d) next2=%v", fired.Format(time.RFC3339), fired.Hour(),
@@ -224,11 +224,14 @@ func TestAuditNextFireSkipsSlotAcrossDST(t *testing.T) {
 	if fired.Hour() != 3 {
 		t.Fatalf("前提不成立: %v", fired)
 	}
-	if contains(hours, next.Hour()) {
-		t.Fatalf("缺陷行为已消失（跨 DST 的时点仍然对得上？请更新审计报告）")
+	// 跳表那天（3/8）的 03:00 必须照常排上：+24h 会漂到 04:00 从而静默跳过一档保活。
+	if !contains(hours, next.Hour()) {
+		t.Fatalf("3/8 的保活档被跳过了: next=%v", next)
 	}
-	if gap := next2.Sub(fired); gap < 40*time.Hour {
-		t.Fatalf("缺陷行为已消失（间隔只有 %v）", gap)
+	if d := next.Sub(fired); d < 22*time.Hour || d > 24*time.Hour {
+		t.Fatalf("3/7→3/8 的间隔异常（跳表那天应为 23h）: %v", d)
 	}
-	t.Logf("两次真实保活间隔 %v（3/8 那档被静默跳过）", next2.Sub(fired))
+	if d := next2.Sub(next); d != 24*time.Hour {
+		t.Fatalf("3/8→3/9 的间隔应为 24h: %v", d)
+	}
 }

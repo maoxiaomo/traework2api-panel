@@ -598,11 +598,10 @@ function trangeEmit(id) {
   if (fn) fn();
 }
 
-// trangeQuery 把当前选择翻译成查询参数。
-//   rolling=true  → 滚动预设发 hours（服务端整点对齐），今天/自定义发 from/to
-//   rolling=false → 一律发 from/to（归档是线性日志，前端算区间更直观）
-// 「全部历史」两者都不发。
-function trangeQuery(id, rolling) {
+// trangeQuery 把当前选择翻译成查询参数：一律发 from/to（归档是线性日志，前端算区间更直观）。
+// 「全部历史」不发任何参数。
+// （原来还带一个 rolling 参数走 hours 分支，但唯一的调用点永远传 false —— 死开关，已删。）
+function trangeQuery(id) {
   const st = trangeState(id);
   const q = new URLSearchParams();
   const sec = d => Math.floor(d.getTime() / 1000);
@@ -616,20 +615,8 @@ function trangeQuery(id, rolling) {
     return q;
   }
   if (st.preset === '0') return q;
-  if (rolling) { q.set('hours', st.preset); return q; }
   q.set('from', sec(new Date(Date.now() - Number(st.preset) * 3600 * 1000)));
   return q;
-}
-
-// trangeLabel 人读口径，用于「用量总览」右上角这类需要回显区间的位置。
-function trangeLabel(id) {
-  const st = trangeState(id);
-  const found = TRANGE_PRESETS.find(p => p[0] === st.preset);
-  if (st.preset !== 'custom') return found ? found[1] : '';
-  if (!st.from && !st.to) return '自定义';
-  const f = d => d ? (d.getMonth() + 1) + '-' + String(d.getDate()).padStart(2, '0') + ' ' +
-    String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0') : '…';
-  return f(st.from) + ' → ' + f(st.to);
 }
 
 function fmtMs(ms) {
@@ -801,7 +788,7 @@ async function loadLogs() {
   const limit = ($('reqLimit') && $('reqLimit').value) || 100;
   // 时间范围由归档侧过滤（不是前端筛已拉取的条目）：区间落在更早的时间段时，
   // 「最近 N 条」里根本不会有那些记录，必须让服务端按时间取。
-  const rq = trangeQuery('reqRange', false);
+  const rq = trangeQuery('reqRange');
   rq.set('limit', limit);
   try {
     const [d, requestRows] = await Promise.all([

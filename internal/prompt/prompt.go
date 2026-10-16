@@ -55,11 +55,13 @@ func Rewrite(body []byte, systemPrompt string) []byte {
 	}
 	msgs, ok := obj["messages"].([]any)
 	if !ok {
-		obj["messages"] = []any{map[string]any{"role": "system", "content": systemPrompt}}
-		if out, err := json.Marshal(obj); err == nil {
-			return out
+		m, isMsg := obj["messages"].(map[string]any)
+		if !isMsg {
+			// messages 是 null/缺失/字符串这类形态：不猜语义，原样交给上游
+			// （旧行为是替换成一条网关 system —— 单条对象里的用户内容会被整段丢掉）。
+			return body
 		}
-		return body
+		msgs = []any{m} // 单条消息对象 → 归一成数组，走同一条替换路径
 	}
 	kept := make([]any, 0, len(msgs)+1)
 	for _, m := range msgs {
@@ -97,11 +99,13 @@ func Append(body []byte, systemPrompt string) []byte {
 	}
 	msgs, ok := obj["messages"].([]any)
 	if !ok {
-		obj["messages"] = []any{map[string]any{"role": "system", "content": systemPrompt}}
-		if out, err := json.Marshal(obj); err == nil {
-			return out
+		m, isMsg := obj["messages"].(map[string]any)
+		if !isMsg {
+			// messages 是 null/缺失/字符串这类形态：不猜语义，原样交给上游
+			// （旧行为是替换成一条网关 system —— 单条对象里的用户内容会被整段丢掉）。
+			return body
 		}
-		return body
+		msgs = []any{m} // 单条消息对象 → 归一成数组，走同一条替换路径
 	}
 	insertAt := 0
 	for _, m := range msgs {

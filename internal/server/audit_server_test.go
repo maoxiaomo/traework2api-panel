@@ -86,8 +86,8 @@ func TestAuditResponsesStreamPreStreamErrorIsHTTP200(t *testing.T) {
 	}
 }
 
-// TestAuditMessagesStreamPreStreamErrorIsHTTP200 同一缺陷的 Anthropic 侧。
-func TestAuditMessagesStreamPreStreamErrorIsHTTP200(t *testing.T) {
+// TestAuditMessagesPreStreamErrorKeepsRealStatus 同一缺陷的 Anthropic 侧。
+func TestAuditMessagesPreStreamErrorKeepsRealStatus(t *testing.T) {
 	var calls []string
 	up := auditUpstream(&calls, func(string) (int, string, bool) {
 		return 500, "对话不该被调到", false
@@ -101,11 +101,17 @@ func TestAuditMessagesStreamPreStreamErrorIsHTTP200(t *testing.T) {
 
 	t.Logf("HTTP status=%d content-type=%q", rec.Code, rec.Header().Get("Content-Type"))
 	t.Logf("body=%s", strings.TrimSpace(rec.Body.String()))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("期望复现「错误也被当成 200 回」：实际 %d", rec.Code)
+	// 首字节前的失败必须回真实状态码：200 + error 帧会让客户端把「请求没打成」
+	// 当成「流正常结束了」（responses 那侧已经这么改过，这里是漏掉的另一半）。
+	if rec.Code == http.StatusOK {
+		t.Fatalf("错误被当成 200 回：blog=%s", rec.Body.String())
 	}
-	if body := rec.Body.String(); !strings.Contains(body, "event: error") || !strings.Contains(body, "unknown model") {
-		t.Fatalf("期望 SSE error 帧带原始错误文案，实得 %q", body)
+	body := rec.Body.String()
+	if strings.Contains(body, "event: error") {
+		t.Fatalf("首字节前不该发 SSE 帧: %q", body)
+	}
+	if !strings.Contains(body, "unknown model") {
+		t.Fatalf("错误体应带原始文案: %q", body)
 	}
 }
 
@@ -358,13 +364,16 @@ func TestAuditReadArchiveAbortsEverythingOnOneBadFile(t *testing.T) {
 	}
 	events, err := r.ReadArchive(1, reqlog.Filter{})
 	t.Logf("ReadArchive(limit=1)：events=%d err=%v", len(events), err)
-	if err == nil {
-		t.Fatal("期望复现「单个归档文件打不开 → 整次读盘失败」")
+	// 坏分片只该被跳过，不该让整页请求记录 500。
+	if err != nil {
+		t.Fatalf("单个坏分片不该让整次读盘失败: %v", err)
 	}
-	if !strings.Contains(err.Error(), "no such file") {
-		t.Fatalf("期望是打开那个旧文件失败：%v", err)
+	if len(events) != 1 || events[0].RequestID != "req-audit-1" {
+		t.Fatalf("好分片的事件应该照读: %+v", events)
 	}
-	t.Logf("→ limit=1 也照样打开了全部归档文件（否则不会碰到坏文件）；面板拿到 err 后整页 500")
+	if le := r.Snapshot().Archive.LastError; !strings.Contains(le, "no such file") {
+		t.Fatalf("跳过原因应留在 last_error 里，实得 %q", le)
+	}
 }
 
 // TestAuditRecordAfterCloseIsSwallowedSilently：Close 之后 Record 的事件既进不了盘，
@@ -399,10 +408,11 @@ func TestAuditRecordAfterCloseIsSwallowedSilently(t *testing.T) {
 		t.Fatalf("读归档不该出错: %v", err)
 	}
 	if len(events) != 1 || events[0].RequestID != "req-before-close" {
-		t.Fatalf("期望复现「Close 后的事件无声消失」：%v", ids)
+		t.Fatalf("Close 前后的边界不对：%v", ids)
 	}
-	if stats.DroppedWrites != 0 {
-		t.Fatalf("期望复现「丢了却不算 dropped」：%d", stats.DroppedWrites)
+	// Close 之后写不进去是事实，但不能无声无息：必须计成 dropped。
+	if stats.DroppedWrites != 2 {
+		t.Fatalf("Close 后丢的 2 条没计成 dropped：%d", stats.DroppedWrites)
 	}
 }
 
@@ -502,24 +512,34 @@ func TestAuditConcurrentMixedPathsNoRace(t *testing.T) {
 // 7. 会话粘性键：派生键只吃 (system + 首条 user)，不同会话会撞同一个键
 // ---------------------------------------------------------------------------
 
-// TestAuditDerivedSessionKeyCollidesAcrossConversations：客户端固定 system 提示词 +
-// 首条用户消息相同（同一个 CLI 的两次会话很常见）时，两次**不同**的会话派生出同一个
-// 键 —— 它们会被粘到同一个账号（互相排队，且不再轮换）。
-func TestAuditDerivedSessionKeyCollidesAcrossConversations(t *testing.T) {
-	convA := `{"model":"glm-5.2","messages":[
-		{"role":"system","content":"You are a coding agent."},
-		{"role":"user","content":"继续"},
-		{"role":"assistant","content":"上一次的答案 A"},
-		{"role":"user","content":"改成 B 方案"}]}`
-	convB := `{"model":"glm-5.2","messages":[
-		{"role":"system","content":"You are a coding agent."},
-		{"role":"user","content":"继续"},
-		{"role":"assistant","content":"完全不同的上下文"},
-		{"role":"user","content":"帮我改个 bug"}]}`
-	ka, kb := session.ExtractKey([]byte(convA)), session.ExtractKey([]byte(convB))
-	t.Logf("会话 A 派生键=%s", ka)
-	t.Logf("会话 B 派生键=%s", kb)
-	if ka == "" || ka != kb {
-		t.Fatalf("期望复现「不同会话同一个键」：%q vs %q", ka, kb)
+// TestAuditSessionKeyIsAPrefixKeyNotAConversationID：派生键是「前缀键」而不是会话 id。
+// 刻意只取 system + 首条 user 文本：同一会话每轮都在尾部追加，哈希整段会让键每轮都变、
+// 上游 prompt 缓存全废。代价是前缀完全相同的两个会话共用键 —— 它们本来就会命中同一份
+// 缓存前缀，共用账号不算错（这条按「设计取舍」结案，用例改为守住这个契约）。
+func TestAuditSessionKeyIsAPrefixKeyNotAConversationID(t *testing.T) {
+	sys := `"role":"system","content":"You are a coding agent."`
+	convA := `{"model":"glm-5.2","messages":[` +
+		`{` + sys + `},{"role":"user","content":"继续"},` +
+		`{"role":"assistant","content":"上一次的答案 A"},{"role":"user","content":"改成 B 方案"}]}`
+	// 同一会话多一轮（尾部追加）：键必须不变，否则每轮换号、prompt 缓存全废。
+	convA2 := `{"model":"glm-5.2","messages":[` +
+		`{` + sys + `},{"role":"user","content":"继续"},` +
+		`{"role":"assistant","content":"上一次的答案 A"},{"role":"user","content":"改成 B 方案"},` +
+		`{"role":"assistant","content":"好"},{"role":"user","content":"再改一处"}]}`
+	// 开场白不同：键必须不同（前缀不同 = 不是同一条缓存前缀）。
+	convB := `{"model":"glm-5.2","messages":[` + `{` + sys + `},{"role":"user","content":"帮我改个 bug"}]}`
+
+	ka := session.ExtractKey([]byte(convA))
+	ka2 := session.ExtractKey([]byte(convA2))
+	kb := session.ExtractKey([]byte(convB))
+	t.Logf("A=%s\nA(追加一轮)=%s\nB=%s", ka, ka2, kb)
+	if ka == "" || ka2 == "" || kb == "" {
+		t.Fatalf("三个请求都该派生出行键: %q %q %q", ka, ka2, kb)
+	}
+	if ka != ka2 {
+		t.Fatalf("尾部追加一轮后键变了（粘性/缓存会每轮失效）: %q vs %q", ka, ka2)
+	}
+	if ka == kb {
+		t.Fatalf("开场白不同的两个会话不该同键: %q", ka)
 	}
 }

@@ -122,7 +122,9 @@ func nextFire(now time.Time, hours []int) time.Time {
 	for _, h := range hours {
 		t := time.Date(now.Year(), now.Month(), now.Day(), h, 0, 0, 0, now.Location())
 		if !t.After(now) {
-			t = t.Add(24 * time.Hour)
+			// 日历日 +1（Date 会归一 DST），不是 +24h：春季跳表那天 +24h 会把时点漂到
+			// 隔壁小时（3/7 03:00 EST + 24h = 3/8 04:00 EDT），那一档就被静默跳过。
+			t = time.Date(now.Year(), now.Month(), now.Day()+1, h, 0, 0, 0, now.Location())
 		}
 		if earliest.IsZero() || t.Before(earliest) {
 			earliest = t

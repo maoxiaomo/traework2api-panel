@@ -751,7 +751,10 @@ func (w *messagesWriter) finish() {
 			}
 			return
 		}
-		_ = w.emitJSONError()
+		// 客户端要的是 SSE，但一个字节都还没出去（模型不存在、上游 4xx 这类首字节前的失败）：
+		// 此时应当回真实状态码 + JSON 错误体，而不是 200 + 一帧 error —— 后者会让客户端
+		// 把「请求没打成」当成「流正常结束了」。
+		w.flushJSON()
 		return
 	}
 	w.flushJSON()
@@ -786,22 +789,6 @@ func (w *messagesWriter) flushJSON() {
 	}
 	w.ResponseWriter.WriteHeader(status)
 	_, _ = w.ResponseWriter.Write(raw)
-}
-
-func (w *messagesWriter) emitJSONError() error {
-	var obj map[string]any
-	_ = json.Unmarshal(w.body, &obj)
-	msg := "upstream error"
-	if e, ok := obj["error"].(map[string]any); ok {
-		if m := asString(e["message"]); m != "" {
-			msg = m
-		}
-	}
-	status := w.status
-	if status == 0 {
-		status = http.StatusInternalServerError
-	}
-	return w.emitError(msg, anthropicErrType(status))
 }
 
 func (w *messagesWriter) handleFrame(frame string) error {

@@ -209,6 +209,10 @@ func hasUserIDKey(obj map[string]any) bool {
 
 // deriveKey 从内容派生稳定会话键：SHA-256(system 文本 + 首条 user 文本) 前 16 字节。
 // 取不到任何用户文本（纯图片等）→ 空串，退回普通轮换。
+//
+// 刻意只取前缀（system + 首条 user），不是缺陷：粘性的目的是命中上游 prompt 缓存，而同一会话
+// 每轮都在尾部追加，哈希整段会让键每轮都变、缓存全废。代价是「前缀完全相同」的两个会话共用
+// 一个键（同一条 system + 同一个开场白）——它们本来就会命中同一份前缀缓存，共用账号不算错。
 func deriveKey(obj map[string]any) string {
 	msgs, ok := obj["messages"].([]any)
 	if !ok || len(msgs) == 0 {

@@ -45,20 +45,16 @@ func TestAuditEmptyPromptTextDisablesRewriteSilently(t *testing.T) {
 	body := []byte(`{"model":"glm-5.2","messages":[` +
 		`{"role":"system","content":"You are TRAE SOLO, 固定模板句（本来要被抹掉的指纹）"},` +
 		`{"role":"user","content":"hi"}]}`)
+	// Load 已经报错，text 恒为空；空文本走 passthrough 是 Rewrite/Append 自身该有的守卫
+	// （调用方拿到 err 就会 fail fast，不会走到这里）。
 	out := Rewrite(body, text)
-	t.Logf("Rewrite(body, 空提示词) 是否逐字节原样返回: %v", bytes.Equal(out, body))
-	t.Logf("客户端 system 原样保留: %v", bytes.Contains(out, []byte("固定模板句")))
 	if !bytes.Equal(out, body) {
-		t.Fatalf("期望复现「空提示词 = 不改写」：out=%s", out)
+		t.Fatalf("空文本应原样返回：%s", out)
 	}
-	if !bytes.Contains(out, []byte("固定模板句")) {
-		t.Fatal("指纹本该被抹掉，前提变了")
-	}
-	// Append 同理（同一个空文本守卫）。
 	if out2 := Append(body, text); !bytes.Equal(out2, body) {
 		t.Fatalf("Append 也应当原样返回：%s", out2)
 	}
-	t.Logf("→ custom/append 模式静默退化成 passthrough：没有任何错误、日志或界面提示")
+	t.Logf("→ 空提示词文件在 Load 处就报错（custom/append 不会静默退化成 passthrough）")
 }
 
 // TestAuditNonArrayMessagesIsSilentlyReplaced：Rewrite 的对外契约是「解析失败 → 原样返回，
@@ -75,15 +71,21 @@ func TestAuditNonArrayMessagesIsSilentlyReplaced(t *testing.T) {
 	}
 	msgs, _ := got["messages"].([]any)
 	t.Logf("输入 messages 是对象 → 输出 messages=%v（%d 条）", got["messages"], len(msgs))
-	t.Logf("用户内容还在吗: %v；temperature 被保留: %v",
-		strings.Contains(string(out), "保留我这段用户内容"), got["temperature"])
-	if len(msgs) != 1 {
-		t.Fatalf("期望复现「被替换成单条网关 system」：%v", got["messages"])
+	if len(msgs) != 2 {
+		t.Fatalf("单条消息对象应归一成数组并插入网关 system（共 2 条）：%v", got["messages"])
 	}
-	if strings.Contains(string(out), "保留我这段用户内容") {
-		t.Fatal("用户内容本该被丢掉，前提变了")
+	if first, _ := msgs[0].(map[string]any); first["role"] != "system" || first["content"] != "GW-PROMPT" {
+		t.Fatalf("网关 system 没插在最前：%v", msgs[0])
 	}
-	// messages: null 走同一条分支（这里只留证据，不当独立缺陷计）。
+	if !strings.Contains(string(out), "保留我这段用户内容") {
+		t.Fatalf("用户内容被丢掉了：%s", out)
+	}
+	if got["temperature"] != 0.2 {
+		t.Fatalf("其它字段没保留: %v", got["temperature"])
+	}
+	// messages 是 null 这类形态：不猜语义，原样返回（别把请求改成「只剩一条网关 system」）。
 	nullBody := []byte(`{"model":"m","messages":null}`)
-	t.Logf("messages=null 也一样：%s", Rewrite(nullBody, "GW-PROMPT"))
+	if got := Rewrite(nullBody, "GW-PROMPT"); !bytes.Equal(got, nullBody) {
+		t.Fatalf("messages=null 应原样返回，实得：%s", got)
+	}
 }

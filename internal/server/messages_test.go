@@ -374,16 +374,23 @@ func TestMessagesEndpointStreamErrorBeforeSSE(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest("POST", "/v1/messages", strings.NewReader(`{"model":"glm-5.2","max_tokens":16,"messages":[{"role":"user","content":"hi"}],"stream":true}`))
 	h.ServeHTTP(rec, req)
-	if rec.Code != 200 {
-		t.Fatalf("code=%d want 200 SSE", rec.Code)
+	// 首字节还没出去就失败（这里是无可用账号）：回真实状态码 + JSON 错误体，
+	// 不能 200 + 一帧 error —— 客户端会把「请求没打成」当成「流正常结束」。
+	if rec.Code < 400 {
+		t.Fatalf("code=%d 应为错误状态码；body=%s", rec.Code, rec.Body.String())
 	}
-	types := sseTypes(rec.Body.String())
-	if !containsStr(types, "error") {
-		t.Fatalf("types=%v body=%s", types, rec.Body.String())
+	body := rec.Body.String()
+	if strings.Contains(body, "event:") {
+		t.Fatalf("首字节前不该发 SSE 帧：%s", body)
 	}
-	if containsStr(types, "message_stop") {
-		t.Fatalf("failed stream must not stop cleanly: %v", types)
+	var obj map[string]any
+	if err := json.Unmarshal([]byte(body), &obj); err != nil {
+		t.Fatalf("错误体应是 JSON: %v (%s)", err, body)
 	}
+	if _, ok := obj["error"]; !ok {
+		t.Fatalf("错误体缺少 error 字段：%s", body)
+	}
+	t.Logf("首字节前失败 → HTTP %d，body=%s", rec.Code, body)
 }
 
 func TestMessagesAuthXAPIKey(t *testing.T) {

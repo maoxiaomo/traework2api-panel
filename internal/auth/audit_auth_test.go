@@ -24,21 +24,9 @@ func TestAuditLoadDirGlobMetacharacterYieldsNoAccounts(t *testing.T) {
 	}
 
 	as, err := LoadDir(dir)
-	t.Logf("LoadDir(%q) → %d 个账号, err=%v（目录里确实有 1 个可解析的 trae-u1.json）", dir, len(as), err)
-	if err != nil || len(as) != 0 {
-		t.Fatalf("缺陷行为已消失（换掉了 Glob？请更新审计报告）: n=%d err=%v", len(as), err)
-	}
-
-	// 对照：换个不带元字符的目录名就正常
-	plain := filepath.Join(t.TempDir(), "auths1")
-	if err := os.MkdirAll(plain, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(plain, "trae-u1.json"), []byte(raw), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if got, err := LoadDir(plain); err != nil || len(got) != 1 {
-		t.Fatalf("对照组异常: n=%d err=%v", len(got), err)
+	t.Logf("LoadDir(%q) → %d 个账号, err=%v", dir, len(as), err)
+	if err != nil || len(as) != 1 {
+		t.Fatalf("带 [ ] 的目录名也必须正常读出账号（不能当 Glob 模式）: n=%d err=%v", len(as), err)
 	}
 }
 
@@ -53,10 +41,15 @@ func TestAuditParseRejectsUsableRefreshTokenOnlyFile(t *testing.T) {
 	}
 	as, err := LoadDir(dir)
 	t.Logf("只有 refreshToken 的文件 → LoadDir 返回 %d 个账号, err=%v", len(as), err)
-	if err != nil || len(as) != 0 {
-		t.Fatalf("缺陷行为已消失（Parse 接受 refreshToken-only 了？请更新审计报告）: n=%d err=%v", len(as), err)
+	// 这种账号是能救回来的（签到/保活用 refreshToken 换 access token），不该被静默丢掉。
+	if err != nil || len(as) != 1 || as[0].UID != "u1" {
+		t.Fatalf("只含 refreshToken 的账号应被载入: n=%d err=%v", len(as), err)
 	}
-	if _, perr := Parse([]byte(raw)); perr == nil {
-		t.Fatal("前提不成立：Parse 竟然接受了")
+	if _, perr := Parse([]byte(raw)); perr != nil {
+		t.Fatalf("Parse 应接受只含 refreshToken 的文件: %v", perr)
+	}
+	// 两个都没有才是无效。
+	if _, perr := Parse([]byte(`{"account":{"uid":"u2"},"auth":{}}`)); perr == nil {
+		t.Fatal("无 accessToken 也无 refreshToken 的文件应判无效")
 	}
 }

@@ -232,7 +232,7 @@ func TestAuditDeltaDiscoveryBudgetStarvesLaterRealm(t *testing.T) {
 	defer cancel()
 	err := c.DiscoverHosts(ctx)
 	if err == nil {
-		t.Fatalf("行为已变（疑似修好）：国服把预算耗尽后 DiscoverHosts 竟然没报错")
+		t.Fatal("国服那一半挂住时应当返回错误（国际那半照常发现）")
 	}
 	t.Logf("预算耗尽后 err = %v", err)
 
@@ -422,7 +422,7 @@ func TestAuditDeltaBonusQuotaIgnored(t *testing.T) {
 // 但同期新加的 ent_usage_unit_test.go 把国际号的 Expire 钉成绝对时刻 1793491199
 // （= 固件 end_time，2026-11-01）：那天一过，expireQuota/expireAny 都不再被填，
 // Expire 变 0，那条断言会自己变红（不是回归，是夹具/断言的时间耦合）。
-func TestAuditDeltaIntlExpireIsNowGated(t *testing.T) {
+func TestAuditDeltaIntlExpireGatedByNow(t *testing.T) {
 	body := string(audFixture(t, "ent_usage-intl.json"))
 	var doc struct {
 		Packs []struct {

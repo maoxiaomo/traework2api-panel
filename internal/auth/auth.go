@@ -5,6 +5,7 @@ package auth
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -246,8 +247,10 @@ func Parse(raw []byte) (*Auth, error) {
 	if err != nil {
 		return nil, err
 	}
-	if strings.TrimSpace(a.AccessToken) == "" {
-		return nil, fmt.Errorf("parse_error: missing accessToken")
+	// 只含 refreshToken 的文件同样是可用账号：签到/保活会用它换回 access token。
+	// 两个都没有才判无效——否则这种账号会被静默丢掉，面板上凭空少一个号。
+	if strings.TrimSpace(a.AccessToken) == "" && strings.TrimSpace(a.RefreshToken) == "" {
+		return nil, fmt.Errorf("parse_error: missing accessToken and refreshToken")
 	}
 	return a, nil
 }
@@ -300,21 +303,40 @@ func (a *Auth) saveAtomicLocked() error {
 	return nil
 }
 
-// LoadDir 扫描 dir 下 trae-*.json。解析失败的文件静默跳过（启动日志由调用方统计）。
+// LoadDir 扫描 dir 下 trae-*.json。解析失败的文件跳过并留日志（静默跳过 = 账号凭空消失）。
+//
+// 不用 filepath.Glob：目录名里带 [ ] * ? 时 Glob 会把它们当模式，展开出空集或**别的目录**的
+// 文件（实测 auths[1]/ 下 1 个账号被读成 0 个）。公开的目录名不该被当模式解析。
 func LoadDir(dir string) ([]*Auth, error) {
-	files, err := filepath.Glob(filepath.Join(dir, "trae-*.json"))
+	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, err
 	}
 	var out []*Auth
-	for _, f := range files {
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasPrefix(name, "trae-") || !strings.HasSuffix(name, ".json") {
+			continue
+		}
+		f := filepath.Join(dir, name)
 		raw, err := os.ReadFile(f)
 		if err != nil {
+			log.Printf("[auth] 读不到账号文件 %s，跳过: %v", f, err)
 			continue
 		}
 		a, err := Parse(raw)
 		if err != nil {
+			log.Printf("[auth] 账号文件 %s 解析失败，跳过: %v", f, err)
 			continue
+		}
+		if strings.TrimSpace(a.AccessToken) == "" {
+			log.Printf("[auth] %s 只有 refreshToken：下一轮签到/保活会取回 access token", f)
+		}
+		if strings.TrimSpace(a.UID) == "" {
+			// 池按 uid 建索引：uid 为空的两个文件会**互相覆盖**，只剩一个号。
+			// 文件名本来就带 uid（trae-<uid>.json），拿它兜底。
+			a.UID = strings.TrimSuffix(strings.TrimPrefix(name, "trae-"), ".json")
+			log.Printf("[auth] %s 里没有 uid，按文件名补成 %q（否则同为空 uid 的账号会互相覆盖）", f, a.UID)
 		}
 		a.FilePath = f
 		out = append(out, a)

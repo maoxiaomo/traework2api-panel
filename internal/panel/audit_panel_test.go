@@ -171,12 +171,12 @@ func TestAuditPanelAPIsAllRequireKey(t *testing.T) {
 // 2. 「空密钥」被显示成「本机免鉴权」：与真实绑定面无关的安全指示
 // ---------------------------------------------------------------------------
 
-// TestAuditOverviewCannotDistinguishLoopbackFromAllInterfaces：overview 只透出
+// TestAuditOverviewReportsAuthScope：overview 只透出
 // auth_required（panel.go:228），app.js:265 由它单独决定文案「本机免鉴权」。
 // 但绑定地址来自 config.listen，默认 ":7864"（= 0.0.0.0，全接口）—— 同一份 overview 在
 // 「只监听回环」和「监听全部网卡」两种配置下**完全相同**，前端那句「本机」在后者上是错的，
 // 而它正是运维判断"这个网关有没有暴露"的唯一界面依据。
-func TestAuditOverviewCannotDistinguishLoopbackFromAllInterfaces(t *testing.T) {
+func TestAuditOverviewReportsAuthScope(t *testing.T) {
 	p := New(Config{Pool: pool.New(""), Version: "audit"}) // APIKey 空
 	rec := auditPanelReq(p, "GET", "/panel/api/overview", "", nil)
 	if rec.Code != http.StatusOK {
@@ -254,14 +254,9 @@ func TestAuditConfigAPIHasNoCacheControl(t *testing.T) {
 // 4. 前端死开关 / 死属性：rolling 参数只被传 false，trangeLabel 无调用点
 // ---------------------------------------------------------------------------
 
-// TestAuditDeadFrontendSwitchAndAttribute：三处「写了没读」：
-//   - trangeQuery(id, rolling)（app.js:509）唯一的调用点在 app.js:708 传 **false**，
-//     于是 rolling=true 那条分支（滚动预设发 hours）永远不执行；更糟的是该分支里
-//     「全部历史」preset 直接 return 空参数（WB 版是 hours=0），即服务端回落默认 72 小时 ——
-//     一旦有人把 trangeBind 接到用量视图上，界面写「全部历史」而数字是近 72 小时。
-//   - trangeLabel（app.js:529）只有定义、没有任何调用点（用量页改用 usChips）。
-//   - index.html:1108 的 data-lock="1" 在 JS/CSS 里都没有读取点。
-func TestAuditDeadFrontendSwitchAndAttribute(t *testing.T) {
+// TestAuditFrontendHasNoDeadSwitchOrAttribute：三处「写了没读」已删干净（rolling 参数 /
+// trangeLabel / data-lock），改成守住「不再长出来」的回归网。
+func TestAuditFrontendHasNoDeadSwitchOrAttribute(t *testing.T) {
 	app, err := os.ReadFile("app.js")
 	if err != nil {
 		t.Fatal(err)
@@ -272,43 +267,39 @@ func TestAuditDeadFrontendSwitchAndAttribute(t *testing.T) {
 	}
 	src := string(app)
 
-	calls := regexp.MustCompile(`trangeQuery\('([^']+)',\s*(true|false)\)`).FindAllStringSubmatch(src, -1)
+	calls := regexp.MustCompile(`trangeQuery\('([^']+)'`).FindAllStringSubmatch(src, -1)
 	t.Logf("trangeQuery 调用点: %v", calls)
 	if len(calls) == 0 {
 		t.Fatal("没扫到 trangeQuery 的调用点，正则失效")
 	}
-	for _, c := range calls {
-		if c[2] != "false" {
-			t.Fatalf("出现了 rolling=true 的调用点 %v —— 这条缺陷已被修掉", c)
-		}
+	if regexp.MustCompile(`trangeQuery\('[^']+',`).MatchString(src) {
+		t.Fatal("trangeQuery 又出现了第二个参数（死开关回来了）")
 	}
-	if n := strings.Count(src, "trangeLabel("); n != 1 {
-		t.Fatalf("期望复现「trangeLabel 只有定义、没有调用点」：出现 %d 次", n)
+	if n := strings.Count(src, "trangeLabel"); n != 0 {
+		t.Fatalf("trangeLabel 又出现了（%d 次）：没人调的函数别留在文件里", n)
 	}
-	t.Logf("trangeLabel( 出现 %d 次（只有定义那一次）", strings.Count(src, "trangeLabel("))
-	if n := strings.Count(src, "data-lock"); n != 0 {
-		t.Fatalf("app.js 开始读 data-lock 了（%d 次）—— 缺陷已修", n)
-	}
-	if n := strings.Count(string(page), "data-lock"); n != 1 {
-		t.Fatalf("index.html 里 data-lock 出现 %d 次（期望只有那一次写入）", n)
+	if n := strings.Count(src, "data-lock") + strings.Count(string(page), "data-lock"); n != 0 {
+		t.Fatalf("data-lock 又出现了（%d 次）：没人读的属性别留在文件里", n)
 	}
 
 	node, err := exec.LookPath("node")
 	if err != nil {
-		t.Skip("无 node，跳过 rolling 分支语义断言")
+		t.Skip("无 node，跳过区间参数语义断言")
 	}
 	driver := `const assert = require('assert');
 let auditPreset = '0';
 function trangeState(){ return { preset: auditPreset, from: null, to: null }; }
 function trangeMidnight(){ return new Date(2026, 0, 1, 0, 0, 0); }
 ` + extractJSFunc(t, src, "trangeQuery") + `
-for (const rolling of [false, true]) {
-  const q = trangeQuery('x', rolling);
-  console.log('preset=全部历史 rolling=' + rolling + ' → 查询参数 "' + q.toString() + '"');
+for (const preset of ['0', '1', '24', 'today', 'custom']) {
+  auditPreset = preset;
+  console.log('preset=' + preset + ' → "' + trangeQuery('x').toString() + '"');
 }
-// 用量端点：hours=0 才是「全部历史」；这里两种 rolling 都不发 hours。
-assert.strictEqual(trangeQuery('x', true).get('hours'), null, '期望复现「rolling + 全部历史 → 不传 hours，服务端回落 72h」');
-assert.strictEqual(trangeQuery('x', false).get('hours'), null, '（请求记录那条路本来就不发 hours，是对的）');
+auditPreset = '0';
+assert.strictEqual(trangeQuery('x').get('hours'), null, '「全部历史」不该发 hours');
+auditPreset = '24';
+assert.ok(trangeQuery('x').get('from'), '滚动预设要发 from');
+assert.strictEqual(trangeQuery('x').get('hours'), null, '一律走 from/to，不发 hours');
 `
 	out, err := exec.Command(node, "-e", driver).CombinedOutput()
 	t.Logf("node 输出:\n%s", strings.TrimSpace(string(out)))

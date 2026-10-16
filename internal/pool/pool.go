@@ -582,7 +582,7 @@ func (p *Pool) AcquireIfHealthy(uid string) (*auth.Auth, bool) {
 		return nil, false
 	}
 	e.inFlight++
-	e.lastUsed = now
+	p.markPickedLocked(e)
 	return e.a, true
 }
 
@@ -799,10 +799,13 @@ func (p *Pool) CooldownCheckin(uid string, d time.Duration, reason string) {
 	if !ok || e.disabled {
 		return
 	}
-	if !e.coolUntil.IsZero() && time.Now().Before(e.coolUntil) {
+	now := time.Now()
+	until := now.Add(d)
+	if !e.coolUntil.IsZero() && now.Before(e.coolUntil) && !until.After(e.coolUntil) {
+		// 已在冷却中：更重的判罚（plan 权益不足 12h）可以加长，轻的不许缩短已有的。
 		return
 	}
-	e.coolUntil = time.Now().Add(d)
+	e.coolUntil = until
 	e.coolReason = reason
 	p.saveLocked()
 }
@@ -1008,7 +1011,15 @@ func (p *Pool) load() {
 		return
 	}
 	var sf stateFile
-	if json.Unmarshal(raw, &sf) != nil {
+	if err := json.Unmarshal(raw, &sf); err != nil {
+		// 静默从零点开始 = 禁用/冷却/积分全丢，还看不出发生过什么。
+		// 备份现场再重建：上一次保存留下的好文件不会被下一次保存盖掉。
+		bak := p.stateFp + ".corrupt"
+		if rerr := os.Rename(p.stateFp, bak); rerr != nil {
+			log.Printf("[pool] state %s 解析失败且备份失败(%v)，本轮按空状态启动: %v", p.stateFp, rerr, err)
+			return
+		}
+		log.Printf("[pool] state %s 解析失败（%v），已备份为 %s 并按空状态启动（禁用/冷却/积分需重新累积）", p.stateFp, err, bak)
 		return
 	}
 	for uid, s := range sf.Accounts {

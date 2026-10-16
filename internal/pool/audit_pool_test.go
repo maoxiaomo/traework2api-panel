@@ -26,10 +26,16 @@ func TestAuditCooldownCheckinCannotLengthen(t *testing.T) {
 	p.CooldownCheckin("u1", 12*time.Hour, "plan 权益不足")
 
 	st, _ := p.Status("u1")
-	t.Logf("CheckinUntil=%v reason=%q（期望 12h / plan 权益不足）",
-		st.CheckinUntil.Format(time.RFC3339), st.CheckinReason)
-	if time.Until(st.CheckinUntil) > 2*time.Minute || st.CheckinReason != "soft_rate" {
-		t.Fatalf("缺陷行为已消失（长冷却生效了，请更新审计报告）: %+v", st)
+	t.Logf("CheckinUntil=%v reason=%q", st.CheckinUntil.Format(time.RFC3339), st.CheckinReason)
+	// 更重的判罚必须能加长冷却（否则 12h 的「plan 权益不足」被 1min 的 soft_rate 吃掉）。
+	if time.Until(st.CheckinUntil) < 11*time.Hour || st.CheckinReason != "plan 权益不足" {
+		t.Fatalf("长冷却没生效（应加长到 12h）: %+v", st)
+	}
+	// 反向：已经在长冷却里，轻的判罚不许把它缩短。
+	p.CooldownCheckin("u1", time.Minute, "soft_rate")
+	st2, _ := p.Status("u1")
+	if time.Until(st2.CheckinUntil) < 11*time.Hour || st2.CheckinReason != "plan 权益不足" {
+		t.Fatalf("轻判罚把长冷却缩短了: %+v", st2)
 	}
 }
 
@@ -58,9 +64,10 @@ func TestAuditAcquireIfHealthyLeavesUsedSeqStale(t *testing.T) {
 	if got == nil {
 		t.Fatal("没有候选")
 	}
-	t.Logf("LRU 兜底选中 %s（u2 刚被 AcquireIfHealthy 粘住，usedSeq 仍为 0）", got.UID)
-	if got.UID != "u2" {
-		t.Fatalf("缺陷行为已消失（usedSeq 已推进，请更新审计报告）")
+	t.Logf("LRU 兜底选中 %s（u2 刚被 AcquireIfHealthy 粘住）", got.UID)
+	// 粘住也要算「刚用过」：LRU 兜底该选 u1，不该把刚粘住的 u2 再给你一次。
+	if got.UID != "u1" {
+		t.Fatalf("LRU 兜底选中了刚被粘住的 %s：AcquireIfHealthy 没推进 usedSeq", got.UID)
 	}
 }
 
@@ -130,10 +137,13 @@ func TestAuditCorruptStateFileSilentlyDropsAllState(t *testing.T) {
 	}
 	q := New(fp)
 	st, ok := q.Status("u1")
-	t.Logf("坏 state.json → List=%d, Status(u1) ok=%v st=%+v（load() 不打任何日志）",
-		len(q.List()), ok, st)
+	t.Logf("坏 state.json → List=%d, Status(u1) ok=%v st=%+v", len(q.List()), ok, st)
 	if ok {
-		t.Fatal("缺陷行为已消失（坏文件被识别/打日志了，请更新审计报告）")
+		t.Fatal("坏文件不该被当成正常状态载入")
+	}
+	// 现场必须留一份：不然下一次保存就把坏文件覆盖掉了，想查都查不到。
+	if _, err := os.Stat(fp + ".corrupt"); err != nil {
+		t.Fatalf("坏 state.json 没被备份成 .corrupt: %v", err)
 	}
 }
 
@@ -154,8 +164,14 @@ func TestAuditLoadDirAccountsWithoutUIDCollapseIntoOne(t *testing.T) {
 	p := New("")
 	p.SyncToDir(as)
 	l := p.List()
-	t.Logf("2 个无 uid 的 auth 文件 → 池里 %d 个条目（uid=%q），另一个被静默覆盖", len(l), l[0].UID)
-	if len(l) != 1 || l[0].UID != "" {
-		t.Fatalf("缺陷行为已消失（uid 被校验/补齐了，请更新审计报告）: %+v", l)
+	t.Logf("2 个无 uid 的 auth 文件 → 池里 %d 个条目", len(l))
+	// 两个号都得在：uid 为空时会互相覆盖，只剩一个。
+	if len(l) != 2 {
+		t.Fatalf("同为空 uid 的账号被合并了: %+v", l)
+	}
+	for _, a := range as {
+		if a.UID == "" {
+			t.Fatalf("uid 没按文件名兜底: %+v", as)
+		}
 	}
 }

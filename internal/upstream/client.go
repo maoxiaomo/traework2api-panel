@@ -279,6 +279,11 @@ func (c *Client) agentBaseFor(a *auth.Auth) string {
 // identFor 账号地区对应的身份版本组（User-Agent / X-Ide-Version / *-Version-Code）。
 func identFor(a *auth.Auth) (version, versionCode string) {
 	if a != nil && a.Realm() == auth.RealmIntl {
+		// 运维显式钉死的版本对国际版同样生效：否则 SetIdentity 之后国际流量还是老版本，
+		// 而面板/日志里看不出「覆盖没生效」。版本码仍用国际版常量（那两个是不同的轴）。
+		if v := identOverrideVersion(); v != "" {
+			return v, IdeVersionCodeIntl
+		}
 		return IdeVersionIntl, IdeVersionCodeIntl
 	}
 	return currentIdeVersion(), IdeVersionCode
@@ -1245,7 +1250,11 @@ func (c *Client) UserEntUsageDetail(a *auth.Auth) (EntUsage, error) {
 			continue
 		}
 		l := int64(limit)
-		u.Remain += l - int64(p.Usage.CreditsAmount)
+		usedCredits := int64(p.Usage.CreditsAmount)
+		if remain := l - usedCredits; remain > 0 {
+			// 与 CreditPackages 同口径：单包剩余不报负数（超支的包不该把别的包的余额抵掉）。
+			u.Remain += remain
+		}
 		u.Total += l
 		if e > now {
 			expireQuota = earlier(expireQuota, e)
@@ -1264,7 +1273,9 @@ func (c *Client) UserEntUsageDetail(a *auth.Auth) (EntUsage, error) {
 			u.LimitUSD, u.UsedUSD = sm.TotalAmount, sm.ConsumedAmount
 		} else {
 			u.Total = int64(sm.TotalAmount)
-			u.Remain = u.Total - int64(sm.ConsumedAmount)
+			if u.Remain = u.Total - int64(sm.ConsumedAmount); u.Remain < 0 {
+				u.Remain = 0
+			}
 		}
 	}
 	return u, nil
@@ -1467,7 +1478,9 @@ func (c *Client) GetUserInfo(a *auth.Auth) (uid, nickname, enterpriseID string, 
 	if host == "" {
 		host = c.oauthBase()
 	}
-	body := map[string]any{"ReqSource": "IDE", "IDEVersion": IdeVersion}
+	// 用 currentIdeVersion()（含 SetIdentity 覆盖）而不是内置常量：登录请求是账号上线时的
+	// 第一批出站流量，版本覆盖没生效就等于新号一上来就用老版本握手。
+	body := map[string]any{"ReqSource": "IDE", "IDEVersion": currentIdeVersion()}
 	raw, _ := json.Marshal(body)
 	req, err := http.NewRequest(http.MethodPost, host+EpUserInfo, bytes.NewReader(raw))
 	if err != nil {
