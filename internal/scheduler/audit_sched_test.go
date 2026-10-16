@@ -197,8 +197,9 @@ func TestAuditConcurrentRunCheckinNotSerialized(t *testing.T) {
 		run()
 	}
 	t.Logf("同时进入 CheckinUID 的并发峰值=%d（有串行化时只可能为 1）", peak.Load())
-	if peak.Load() < 2 {
-		t.Fatalf("缺陷行为已消失（出现串行化了？请更新审计报告）")
+	// 单飞锁生效后：两路并发只放一轮进来，峰值必须为 1（秒级二次 claim 会延长上游限流窗口）。
+	if peak.Load() > 1 {
+		t.Fatalf("两路并发都进来了（并发峰值=%d）：秒级二次 claim 会延长限流窗口", peak.Load())
 	}
 }
 

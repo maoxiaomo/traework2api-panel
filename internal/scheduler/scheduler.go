@@ -48,6 +48,11 @@ var (
 type Scheduler struct {
 	cfg Config
 	mu  sync.RWMutex
+	// checkinLock / refreshLock 单飞锁：整点时点、每小时补签 ticker、面板按钮、启动补跑
+	// 都可能同时进来。同一账号被两路送进 claim = 秒级二次 claim，而上游原注释说
+	// 「秒级内的第二次 claim 会延长限流窗口」——所以同一任务同时只允许一轮。
+	checkinLock sync.Mutex
+	refreshLock sync.Mutex
 }
 
 // New 构建。
@@ -312,6 +317,12 @@ func contains(hours []int, h int) bool {
 //
 // 返回逐账号结果（面板据此回报「本次 +N 分 / 已签 / 失败原因」）与失败列表（日志与 HTTP 状态码用）。
 func (s *Scheduler) RunCheckinNow() ([]CheckinResult, []error) {
+	// 单飞：整点、补签 ticker、面板按钮、启动补跑四路并发时只放一轮进来。
+	if !s.checkinLock.TryLock() {
+		log.Printf("[checkin] 上一轮还在跑，跳过这一轮")
+		return nil, nil
+	}
+	defer s.checkinLock.Unlock()
 	results := []CheckinResult{} // 非 nil：面板拿到的是 [] 而不是 null
 	var errs []error
 	for i, uid := range s.byUrgency() {
@@ -590,6 +601,12 @@ func (s *Scheduler) CatchUp() {
 // refresh token 链十天半个月没人碰；上游一旦让它过期就只能重登（掉线）。
 // session 失效不立刻杀号：连续 SessionDeadThreshold 次才禁用，成功即清零。
 func (s *Scheduler) RunRefreshNow() {
+	// 单飞：与签到同理，保活不该被两路同时跑（同一账号两次 ExchangeToken 会互相轮换掉票）。
+	if !s.refreshLock.TryLock() {
+		log.Printf("[keepalive] 上一轮还在跑，跳过这一轮")
+		return
+	}
+	defer s.refreshLock.Unlock()
 	for _, st := range s.cfg.Pool.List() {
 		if st.Disabled {
 			continue
