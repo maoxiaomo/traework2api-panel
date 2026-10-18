@@ -54,6 +54,7 @@ function fnLabel(fn) { return FN_LABEL[fn] || fn || '—'; }
 		extractJSFunc(t, src, "tag") + "\n" +
 		extractJSFunc(t, src, "switchLabel") + "\n" +
 		extractJSFunc(t, src, "thinkCell") + "\n" +
+		extractJSFunc(t, src, "mdCaps") + "\n" +
 		extractJSFunc(t, src, "mdRowHtml") + `
 const maxRow = mdRowHtml({ id: 'cn:glm-5.2-max', name: 'GLM-5.2', context_length: 1000000, max: true });
 assert.ok(maxRow.includes('Max 上下文'), 'Max 档行没标记: ' + maxRow);
@@ -81,12 +82,17 @@ func TestModelFilterPure(t *testing.T) {
 	src := string(raw)
 	driver := `
 const assert = require('assert');
-` + extractJSFunc(t, src, "mdSearchText") + "\n" +
+` + extractJSFunc(t, src, "mdCaps") + "\n" +
+		extractJSFunc(t, src, "mdSearchText") + "\n" +
 		extractJSFunc(t, src, "mdMatch") + "\n" +
 		extractJSFunc(t, src, "mdSortList") + `
 const a = { id: 'cn:glm-5.2', name: 'GLM-5.2', capability: 'reasoning_model', function: 'solo_work_lite', context_length: 200000, max_output_tokens: 32000 };
 const b = { id: 'intl:gpt-5.4', name: 'GPT-5.4', capability: 'reasoning_model', function: 'solo_coder', context_length: 128000, max_output_tokens: 64000 };
 const c = { id: 'cn:kimi-k3', name: '', capability: 'reasoning_model', function: 'solo_work_lite' };
+// 能力胶囊上的词也要能搜到（那一列已经不显示上游枚举了）
+assert.ok(mdMatch(a, { q: '推理' }), '搜「推理」应命中');
+assert.ok(mdMatch({ id: 'x', supports_image: true }, { q: '视觉' }), '搜「视觉」应命中');
+assert.ok(!mdMatch({ id: 'x' }, { q: '视觉' }), '没有该能力不该命中');
 // 空条件：全部通过
 assert.ok(mdMatch(a, { q: '', realm: '', fn: '', sort: 'default' }));
 // 关键字：ID 命中、展示名命中（大小写不敏感）、多词 AND

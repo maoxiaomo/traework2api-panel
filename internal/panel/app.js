@@ -376,10 +376,20 @@ function thinkCell(m) {
   if (!raw.length) {
     return '<span class="tag mute" title="上游没给思考字段，也没有 low/medium/high 档位列表">上游未给</span>';
   }
-  const parts = [];
-  if (m.thinking) parts.push('思考：' + (m.thinking === 'enabled' ? '开' : m.thinking));
-  if (m.reasoning_effort_config) parts.push('思考开关：' + switchLabel(m.reasoning_effort_config));
-  return '<span class="tag mute" title="上游原值：' + esc(raw.join(' · ')) + '">' + esc(parts.join(' · ')) + '</span>';
+  const sw = m.reasoning_effort_config ? switchLabel(m.reasoning_effort_config) : '';
+  // 长文案（support_thinking 那句每行都一样）只进 title：一列 92 行重复同一句话是纯噪音。
+  const tip = '上游原值：' + raw.join(' · ') + (sw ? ' · ' + sw : '');
+  // 档位（medium/HIGH/low）与开关（enabled/disabled）是两回事：照原值显示，不互相换算。
+  const t = String(m.thinking || '');
+  const label = t === 'enabled' ? '思考：开' : t === 'disabled' ? '思考：关' : t;
+  // 只有开关没有档位（26 条 thinking 缺省 + support_thinking=false）：上游明确说不能思考，
+  // 就照实标一句；形状不认识时留破折号，不猜。
+  if (!label) {
+    if (sw.indexOf('不支持') === 0) return '<span class="tag mute" title="' + esc(tip) + '">不支持思考</span>';
+    return '<span style="color:var(--ink-3)" title="' + esc(tip) + '">—</span>';
+  }
+  return '<span class="tag ' + (t === 'disabled' ? 'mute' : 'ok') +
+    '" title="' + esc(tip) + '">' + esc(label) + '</span>';
 }
 /* support_thinking:true/false → 支持/不支持；形状不认识就原样显示，不猜。
    上游哪天在这段 JSON 里加了档位列表之类的其它键，就把它原样补在后面，别被这个标签吞掉。 */
@@ -402,7 +412,7 @@ const FN_LABEL = { solo_work_lite: 'Work', solo_coder: 'Coder' };
 function fnLabel(fn) { return FN_LABEL[fn] || fn || '—'; }
 // mdSearchText 参与关键字搜索的字段（ID / 展示名 / 能力）。
 function mdSearchText(m) {
-  return [m.id, m.name, m.capability].filter(Boolean).join(' ').toLowerCase();
+  return [m.id, m.name, m.capability, mdCaps(m).map(c => c[1]).join(' ')].filter(Boolean).join(' ').toLowerCase();
 }
 // mdMatch 单个模型是否满足全部筛选条件。
 function mdMatch(m, f) {
@@ -428,20 +438,31 @@ function mdSortList(list, f) {
   else if (f.sort === 'name') out.sort((a, b) => String(a.id || '').localeCompare(String(b.id || '')));
   return out;
 }
+// mdCaps 能力胶囊（挂在模型名下那排）：渲染与搜索共用一份定义，
+// 否则搜「视觉」搜不到——那一列已经不显示上游枚举了。
+function mdCaps(m) {
+  const out = [];
+  if (m.capability === 'reasoning_model') out.push(['ok', '推理']);
+  if (m.supports_image) out.push(['warn', '视觉']);
+  if (m.max) out.push(['mute', 'Max 上下文']);
+  if (m.legacy) out.push(['warn', '上代', m.legacy_reason || '客户端已隐藏，本仓仍放行']);
+  return out;
+}
 // mdRowHtml 单个模型行（纯渲染，便于独立测试）。
+// 能力/状态做成胶囊挂在模型名下（照 WorkBuddy 的位置）：一列上游枚举（reasoning_model）
+// 每行都长一样，读不出差别；拆成能扫的胶囊才有信息量。
 function mdRowHtml(m) {
   const tip = m.name ? ' title="' + esc(m.name) + '"' : '';
+  const caps = mdCaps(m);
+  const capHtml = caps.length ? '<div class="id" style="margin-top:3px;white-space:normal">' +
+    caps.map(c => tag(c[0], c[1], c[2])).join(' ') + '</div>' : '';
   return '<tr><td class="mark" aria-hidden="true"><i></i></td>' +
-    '<td class="who"' + tip + '><div class="nm">' + esc(m.id) +
-      // Max 档是与原条目并列的独立模型（<模型>-max），不加标记会看成两行同名模型。
-      (m.max ? ' ' + tag('mute', 'Max 上下文') : '') +
-      (m.legacy ? ' ' + tag('warn', '上代', m.legacy_reason || '客户端已隐藏，本仓仍放行') : '') + '</div>' +
-    (m.name ? '<div class="id">' + esc(m.name) + '</div>' : '') + '</td>' +
-    '<td>' + (m.capability ? tag('mute', m.capability) : '—') + '</td>' +
+    '<td class="who"' + tip + '><div class="nm">' + esc(m.id) + '</div>' +
+    (m.name ? '<div class="id">' + esc(m.name) + '</div>' : '') + capHtml + '</td>' +
     '<td>' + thinkCell(m) + '</td>' +
     '<td>' + tag('mute', fnLabel(m.function)) + '</td>' +
     // 倍率：上游基准积分倍率（客户端选择器同源）。没有就是上游没给，显示 — 而不是编一个数。
-    '<td class="num">' + (m.credit_rate ? m.credit_rate.toFixed(2) + '×' : '—') + '</td>' +
+    '<td class="num">' + (m.credit_rate ? '<b>' + m.credit_rate.toFixed(2) + '×</b>' : '—') + '</td>' +
     '<td class="num"' + (m.context_length_max ? ' title="声明口径 max ' + fmtNum(m.context_length_max) + '（本列显示的是 __dev 实际请求口径）"' : '') + '>' +
       (m.context_length ? Math.round(m.context_length / 1000) + 'K' : '—') + '</td>' +
     '<td class="num">' + (m.max_output_tokens ? Math.round(m.max_output_tokens / 1000) + 'K' : '—') + '</td></tr>';
@@ -450,7 +471,7 @@ function renderModels() {
   const tb = $('mdBody');
   const list = mdSortList(mdAll.filter(m => mdMatch(m)));
   if (!list.length) {
-    tb.innerHTML = '<tr><td colspan="7"><div class="empty">' +
+    tb.innerHTML = '<tr><td colspan="6"><div class="empty">' +
       (mdAll.length ? '没有符合当前筛选条件的模型' : '上游未返回模型') + '</div></td></tr>';
   } else {
     tb.innerHTML = list.map(m => mdRowHtml(m)).join('');
@@ -468,7 +489,7 @@ function resetModelFilter() {
 }
 async function loadModels() {
   const tb = $('mdBody');
-  tb.innerHTML = '<tr><td colspan="7"><div class="empty">正在向上游查询…</div></td></tr>';
+  tb.innerHTML = '<tr><td colspan="6"><div class="empty">正在向上游查询…</div></td></tr>';
   try {
     const d = await api('models');
     mdAll = d.data || [];
@@ -482,7 +503,7 @@ async function loadModels() {
     renderModels();
   } catch (e) {
     mdAll = [];
-    tb.innerHTML = '<tr><td colspan="7"><div class="empty">' + esc(e.message) + '</div></td></tr>';
+    tb.innerHTML = '<tr><td colspan="6"><div class="empty">' + esc(e.message) + '</div></td></tr>';
     $('mdCount').textContent = '';
     $('mdNote').textContent = '查询失败';
   }
