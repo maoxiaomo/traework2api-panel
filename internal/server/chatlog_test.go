@@ -20,7 +20,7 @@ import (
 // 同时请求记录事件里 ClientIP/UserAgent 有值。
 
 // chamLogHarness 起一条成功的对话请求，返回日志环与请求记录里的那条事件。
-func runChatWithRing(t *testing.T, clientInfo bool) (*panel.Ring, reqlog.Event) {
+func runChatWithRing(t *testing.T, clientInfo bool, model string) (*panel.Ring, reqlog.Event) {
 	t.Helper()
 	var calls []string
 	up := fakeWithPaths(&calls, func(path, _ string) (int, string, bool) {
@@ -39,7 +39,7 @@ func runChatWithRing(t *testing.T, clientInfo bool) (*panel.Ring, reqlog.Event) 
 	t.Cleanup(func() { log.SetOutput(prev) })
 
 	r := httptest.NewRequest("POST", "/v1/chat/completions",
-		strings.NewReader(`{"model":"glm-5.2","stream":true,"messages":[{"role":"user","content":"hi"}]}`))
+		strings.NewReader(`{"model":"`+model+`","stream":true,"messages":[{"role":"user","content":"hi"}]}`))
 	r.Header.Set("User-Agent", "probe/1.0 (+hermes)")
 	r.RemoteAddr = "203.0.113.7:5555"
 	rr := httptest.NewRecorder()
@@ -55,7 +55,7 @@ func runChatWithRing(t *testing.T, clientInfo bool) (*panel.Ring, reqlog.Event) 
 }
 
 func TestChatRequestLoggedToChatChannel(t *testing.T) {
-	ring, _ := runChatWithRing(t, false)
+	ring, _ := runChatWithRing(t, false, "glm-5.2")
 	var chat []panel.LogEntry
 	for _, e := range ring.Snapshot() {
 		if e.Ch == panel.ChChat {
@@ -73,10 +73,25 @@ func TestChatRequestLoggedToChatChannel(t *testing.T) {
 	}
 }
 
+// 请求记录里的模型要带地区前缀：裸名按模型表兜底成 cn，客户端显式带前缀时用它的。
+func TestChatRequestModelCarriesRealmPrefix(t *testing.T) {
+	// intl 前缀已由 resolve_model_test 覆盖；这里只验「请求记录真的带上了前缀」。
+	for _, tc := range []struct{ model, want string }{
+		{"glm-5.2", "cn:glm-5.2"},
+		{"cn:glm-5.2", "cn:glm-5.2"},
+		{"glm-5.2-max", "cn:glm-5.2-max"}, // -max 是客户端要的档位，不能被剥成裸名
+	} {
+		_, ev := runChatWithRing(t, false, tc.model)
+		if ev.Model != tc.want {
+			t.Errorf("model=%q 请求记录记成 %q，期望 %q", tc.model, ev.Model, tc.want)
+		}
+	}
+}
+
 // TestChatRequestSourceInLogAndRecord 来源字段：开启时日志行与请求记录都要有 IP/UA，
 // 关闭时两处都不出现（同一个开关管两处，不能一处有一处没有）。
 func TestChatRequestSourceInLogAndRecord(t *testing.T) {
-	ring, ev := runChatWithRing(t, true)
+	ring, ev := runChatWithRing(t, true, "glm-5.2")
 	if ev.ClientIP != "203.0.113.7" || !strings.Contains(ev.UserAgent, "probe") {
 		t.Errorf("请求记录没取到来源：ip=%q ua=%q", ev.ClientIP, ev.UserAgent)
 	}
@@ -90,7 +105,7 @@ func TestChatRequestSourceInLogAndRecord(t *testing.T) {
 		t.Errorf("日志行没带来源：%s", line)
 	}
 
-	ring2, ev2 := runChatWithRing(t, false)
+	ring2, ev2 := runChatWithRing(t, false, "glm-5.2")
 	if ev2.ClientIP != "" || ev2.UserAgent != "" {
 		t.Errorf("关掉来源记录后事件里仍有来源：ip=%q ua=%q", ev2.ClientIP, ev2.UserAgent)
 	}

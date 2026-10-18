@@ -39,9 +39,9 @@ type Config struct {
 	// solo_coder 36 个、0 个；而 chat_v3 20 个里 20 个更大（116k→1000k）。
 	// 换面不影响可调用性（本仓 2026-10-04 已实测 function 不是约束：4 模型 × 4 轴 16/16 全 200）。
 	MaxFunction string
-	Session      *session.Router // 可选，会话粘性（同一会话粘同一账号）
-	Panel        http.Handler    // 可选，/panel/
-	Usage        *usage.Recorder // 可选，逐请求用量台账（按 账号×模型×时间片 分桶）
+	Session     *session.Router // 可选，会话粘性（同一会话粘同一账号）
+	Panel       http.Handler    // 可选，/panel/
+	Usage       *usage.Recorder // 可选，逐请求用量台账（按 账号×模型×时间片 分桶）
 	// RequestLog 可选，请求级指标/归档（nil = 不记录）。RequestClientInfo 决定事件里
 	// 是否填调用来源（IP/UA）——比 token 计数敏感，运营可自行决定是否落盘。
 	RequestLog        *reqlog.Recorder
@@ -640,8 +640,13 @@ func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
 
 	// 地区前缀（[realm:]model）在这里剥掉：后面 mapModel / 出站 body / 台账都用裸名。
 	realm, bareModel := resolveModel(peek.Model)
-	if tr := traceFrom(r); tr != nil {
-		tr.Model = bareModel
+	// 请求记录 = 最终地区 + 客户端要的名字（-max 后缀下面会被剥掉，先留一份）。realm 要等
+	// 两次兜底才定死，所以闭包复写：mapModel 报 400 提前返回时也要带上名字。
+	shownModel := bareModel
+	setTraceModel := func() {
+		if tr := traceFrom(r); tr != nil {
+			tr.Model = realm + ":" + shownModel
+		}
 	}
 	prefixed := bareModel != peek.Model
 	if !prefixed {
@@ -666,6 +671,7 @@ func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
 
 	configName, err := h.mapModel(bareModel, realm)
 	if err != nil {
+		setTraceModel()
 		writeOpenAIError(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
@@ -679,7 +685,9 @@ func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
 
 	// 台账用**解析后的**上游模型名（config_name）：客户端可能发 cn:glm-5.2 或别名，
 	// 按入站原样分桶会把同一个模型在面板上拆成多行，别名还查不到单价（积分显示 —）。
-	// 请求记录（tr.Model）仍记 bareModel —— 那是「客户端要了什么」，两边口径不同是故意的。
+	// 请求记录（tr.Model）记 realm + 客户端裸名 —— 面板上直接看得出这次走的是国内还是国际，
+	// 两边口径不同是故意的。
+	setTraceModel()
 	peek.Model = configName
 
 	body = setModelInBody(body, configName, h.modelPickOnly(configName))
