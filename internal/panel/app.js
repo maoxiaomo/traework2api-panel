@@ -1623,25 +1623,38 @@ async function loadPackages() {
 // 地区：链接按地区切域（国内 www.trae.cn / 国际 www.trae.ai）。回调自带 OAuth host，
 // 所以换票那步不用再选一次——面板按 host 自动落 domain/apiHost。
 let addRealm = 'cn';
+let addTab = 'browser';
+
+// switchAddTab 主按钮跟着 tab 走：一屏只有一个「加入」，避免两个并列主 CTA 抢焦点。
+function switchAddTab(tab) {
+  document.querySelectorAll('#addTabs .tab').forEach(b => b.classList.toggle('on', b.dataset.tab === tab));
+  $('addTabBrowser').hidden = tab !== 'browser';
+  $('addTabToken').hidden = tab !== 'token';
+  $('btnAddFinish').hidden = tab !== 'browser' || !loginID;
+  $('btnRefreshLogin').hidden = tab !== 'token';
+}
+
 function openAdd() {
   loginID = '';
+  addTab = 'browser';
+  switchAddTab(addTab);
   $('addLoad').hidden = false;
   $('addReady').hidden = true;
   $('addErr').hidden = true;
   $('btnCopyUrl').hidden = true;
   $('btnOpenUrl').hidden = true;
-  $('btnAddFinish').hidden = true;
   $('callback').value = '';
   $('addRefreshToken').value = '';
   $('addVeil').classList.add('on');
   api('login/start', { method: 'POST', body: JSON.stringify({ realm: addRealm }) }).then(d => {
     loginID = d.id;
     $('addUrl').textContent = d.url;
+    $('addUrl').title = d.url; // 单行截断，悬停看全
     $('addLoad').hidden = true;
     $('addReady').hidden = false;
     $('btnCopyUrl').hidden = false;
     $('btnOpenUrl').hidden = false;
-    $('btnAddFinish').hidden = false;
+    switchAddTab(addTab); // loginID 到手，主按钮按 tab 放出来
   }).catch(e => {
     $('addLoad').hidden = true;
     $('addErr').hidden = false;
@@ -1721,12 +1734,12 @@ function boot() {
     clearKey();
     location.reload();
   };
-  $('addRealm').addEventListener('click', ev => {
-    const b = ev.target.closest('button[data-realm]');
-    if (!b || b.classList.contains('on')) return;
-    addRealm = b.dataset.realm;
-    document.querySelectorAll('#addRealm .chip').forEach(c => c.classList.toggle('on', c === b));
-    openAdd(); // 换地区就换一条链接，免得拿国内链接登国际号
+  document.querySelectorAll('#addTabs .tab').forEach(b => {
+    b.onclick = () => { addTab = b.dataset.tab; switchAddTab(addTab); };
+  });
+  // 换地区就换一条链接，免得拿国内链接登国际号
+  document.querySelectorAll('#addVeil input[name="addRealm"]').forEach(r => {
+    r.onchange = () => { addRealm = r.value; openAdd(); };
   });
   $('btnAddClose').onclick = () => $('addVeil').classList.remove('on');
   $('btnCopyUrl').onclick = () => {

@@ -485,6 +485,12 @@ func TestPanelServesUsageColumn(t *testing.T) {
 		// 添加账号弹窗：复制链接旁的「在浏览器中打开」
 		{"/panel/", `id="btnOpenUrl"`},
 		{"/panel/app.js", "$('btnOpenUrl').onclick"},
+		// 添加账号弹窗的两条路径分 tab：两个主按钮都必须以 hidden 起步，
+		// 由 switchAddTab 按当前 tab 放出——否则又会回到「两个加入按钮并列抢主次」。
+		{"/panel/", `id="btnAddFinish" class="primary" hidden`},
+		{"/panel/", `id="btnRefreshLogin" class="primary" hidden`},
+		// radio 必须脱掉 input 的 100% 宽/内边距外壳，否则被撑成 58px 高、标签文字竖排。
+		{"/panel/", `input[type=radio] { width: auto; padding: 0;`},
 	} {
 		w := httptest.NewRecorder()
 		p.ServeHTTP(w, httptest.NewRequest("GET", c.path, nil))
