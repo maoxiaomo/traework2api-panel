@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"slices"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -53,6 +54,10 @@ type Scheduler struct {
 	// 「秒级内的第二次 claim 会延长限流窗口」——所以同一任务同时只允许一轮。
 	checkinLock sync.Mutex
 	refreshLock sync.Mutex
+	// grantMu / lastGrant 活动领取的日闸：补签扫描每小时都会走到 CheckinUID，
+	// 不设闸就是每小时 3 次上游请求/号。按本地日期记，跨天自动放行。
+	grantMu   sync.Mutex
+	lastGrant map[string]string
 }
 
 // New 构建。
@@ -63,7 +68,7 @@ func New(cfg Config) *Scheduler {
 	if len(cfg.KeepaliveHours) == 0 {
 		cfg.KeepaliveHours = []int{3}
 	}
-	return &Scheduler{cfg: cfg}
+	return &Scheduler{cfg: cfg, lastGrant: map[string]string{}}
 }
 
 // allHours 当前启用的全部触发时点（两个任务都关掉时为空 → 主循环无事可做）。
@@ -398,6 +403,35 @@ type CheckinResult struct {
 	Status   string `json:"status"`            // ok | already | skipped（上游未开）| failed
 	Credits  int64  `json:"credits,omitempty"` // 本次到账（仅 ok 非 0，取上游 status 告知的可领额度）
 	Reason   string `json:"reason,omitempty"`  // 失败原因原文
+	// Grants 本轮活动/权益领取的逐条结论（每天只跑一次，见 grantOnce）。
+	// 只报「哪条、什么结果」，不报积分——领取接口没有可信的到账额度。
+	Grants string `json:"grants,omitempty"`
+}
+
+// grantOnce 每个账号每天领一次活动/权益，返回给人看的一句话结论（空=跳过或没得领）。
+// 失败不写日闸：网络/解析问题下一轮还能再试。
+func (s *Scheduler) grantOnce(uid string, a *auth.Auth) string {
+	day := time.Now().Format("2006-01-02")
+	s.grantMu.Lock()
+	done := s.lastGrant[uid] == day
+	s.grantMu.Unlock()
+	if done {
+		return ""
+	}
+	notes, err := s.cfg.Upstream.ClaimActivities(a)
+	if err != nil {
+		log.Printf("[grant] %s: %v", uid, err)
+		return ""
+	}
+	s.grantMu.Lock()
+	s.lastGrant[uid] = day
+	s.grantMu.Unlock()
+	if len(notes) == 0 {
+		return ""
+	}
+	out := strings.Join(notes, "；")
+	log.Printf("[grant] %s: %s", uid, out)
+	return out
 }
 
 // CheckinUID 签到并按剩余积分解冻单个账号。禁用返回 ErrDisabled。
@@ -511,6 +545,11 @@ func (s *Scheduler) CheckinUID(uid string) (CheckinResult, error) {
 	}
 	if checkinErr != nil {
 		res.Reason = checkinErr.Error()
+	}
+	// 活动/权益领取：签到判定之后顺手做（每天一次）。只在签上了/今天已签时做——
+	// 签到失败说明上游这会儿不好用（多半是 9074 拥塞），再打三条领取接口只会更堵。
+	if checkinErr == nil && (res.Status == "ok" || res.Status == "already") {
+		res.Grants = s.grantOnce(uid, a)
 	}
 	u, err := s.entUsageOf(uid, a)
 	if err != nil {

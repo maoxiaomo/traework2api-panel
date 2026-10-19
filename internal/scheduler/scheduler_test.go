@@ -50,6 +50,7 @@ type fakeUpstream struct {
 	checkinCalls   atomic.Int32
 	claimCalls     atomic.Int32
 	refreshCalls   atomic.Int32
+	grantCalls     atomic.Int32 // activity/action 的调用次数（日闸用例看它）
 	claimResponse  string
 	resourceRemain int64
 	resourceUsed   int64
@@ -98,6 +99,15 @@ func (f *fakeUpstream) server() *httptest.Server {
 		case strings.HasSuffix(r.URL.Path, "/ide_user_ent_usage"):
 			w.Write([]byte(`{"is_credits_billing":true,"user_entitlement_pack_list":[{"entitlement_base_info":{"quota":{"credits_limit":` +
 				jsonI64(f.resourceRemain) + `}},"usage":{"credits_amount":` + jsonI64(f.resourceUsed) + `}}]}`))
+		// 活动/权益领取：清单回一条券活动，action 回「已领 + 券名」，两条兜底入口都回「暂不可用」
+		case strings.HasSuffix(r.URL.Path, "/ug/activity/info"):
+			w.Write([]byte(`{"commercial_activities":[{"activity_id":"act_a","activity_type":108,"Enabled":true}]}`))
+		case strings.HasSuffix(r.URL.Path, "/ug/activity/action"):
+			f.grantCalls.Add(1)
+			w.Write([]byte(`{"work_extra":{"granted":true,"prize_text":"测试券"}}`))
+		case strings.HasSuffix(r.URL.Path, "/grant_work_benefit"),
+			strings.HasSuffix(r.URL.Path, "/work_fission/grant"):
+			w.Write([]byte(`{"code":9069,"message":"活动暂不可用"}`))
 		case strings.HasSuffix(r.URL.Path, "/ExchangeToken"):
 			f.refreshCalls.Add(1)
 			w.Write([]byte(`{"Result":{"Token":"newat","RefreshToken":"newrt","TokenExpireAt":1786805537,"TokenExpireDuration":1209600}}`))
@@ -129,6 +139,35 @@ func newTestScheduler(f *fakeUpstream, p *pool.Pool, srv *httptest.Server) *Sche
 		CheckinHours:   []int{9},
 		KeepaliveHours: []int{3},
 	})
+}
+
+// TestCheckinGrantsOncePerDay 活动领取每天只跑一次：补签扫描每小时都会走到 CheckinUID，
+// 不设日闸就是每小时 N 次上游请求/号。第二次调用必须被闸住，且结论仍能回报给面板。
+func TestCheckinGrantsOncePerDay(t *testing.T) {
+	f := &fakeUpstream{resourceRemain: 500, resourceUsed: 100}
+	srv := f.server()
+	defer srv.Close()
+	p := pool.New("")
+	p.Add(&auth.Auth{UID: "u1", AccessToken: "at", RefreshToken: "rt", ExpiresAt: 9999999999})
+	s := newTestScheduler(f, p, srv)
+
+	res, err := s.CheckinUID("u1")
+	if err != nil {
+		t.Fatalf("checkin: %v", err)
+	}
+	if !strings.Contains(res.Grants, "测试券") {
+		t.Errorf("首次签到应带上活动结论，实得 %q", res.Grants)
+	}
+	res2, err := s.CheckinUID("u1")
+	if err != nil {
+		t.Fatalf("checkin 2: %v", err)
+	}
+	if res2.Grants != "" {
+		t.Errorf("同一天第二次不该再领，实得 %q", res2.Grants)
+	}
+	if n := f.grantCalls.Load(); n != 1 {
+		t.Errorf("activity/action 应只打 1 次（日闸），实得 %d", n)
+	}
 }
 
 func TestRunCheckinReenablesCoolingAccount(t *testing.T) {

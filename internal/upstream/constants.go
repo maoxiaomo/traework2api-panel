@@ -61,6 +61,12 @@ const (
 	EpUserInfo      = "/cloudide/api/v3/trae/GetUserInfo"
 	EpCheckinStatus = "/trae/api/v2/ug/checkin_credits/status"
 	EpCheckinClaim  = "/trae/api/v2/ug/checkin_credits/claim"
+	// 活动/权益领取（2026-10-19 对 6 个真号实测，只在 api.trae.cn 上存在；
+	// api.trae.com.cn 上全 404，所以必须走 ugBase 而不是账号的 ApiHost）。
+	EpActivityInfo   = "/trae/api/v2/ug/activity/info"
+	EpActivityAction = "/trae/api/v2/ug/activity/action"
+	EpGrantBenefit   = "/trae/api/v2/pay/grant_work_benefit"
+	EpFissionGrant   = "/trae/api/v2/ug/work_fission/grant"
 	// EpEntUsage 国内版积分/套餐构成（v2）。
 	EpEntUsage = "/trae/api/v2/pay/ide_user_ent_usage"
 	// EpEntUsageIntl 国际版同一个接口的 **v1** 路径（实测 2026-10-03）：

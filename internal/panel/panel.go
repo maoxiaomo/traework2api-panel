@@ -597,7 +597,7 @@ func (p *Panel) accountCheckin(w http.ResponseWriter, r *http.Request) {
 	}
 	st, _ := p.cfg.Pool.Status(uid)
 	writeJSON(w, http.StatusOK, map[string]any{
-		"ok": true, "status": res.Status, "earned": res.Credits, "account": st,
+		"ok": true, "status": res.Status, "earned": res.Credits, "grants": res.Grants, "account": st,
 	})
 }
 

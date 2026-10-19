@@ -1051,6 +1051,150 @@ func (c *Client) CheckinClaim(a *auth.Auth) error {
 // 客户端口径是 status/claim/usage 三个接口都带这个字段（我们的 {} 目前也 200，属对齐而非修 bug）。
 const ugBody = `{"req_source":1}`
 
+// grantPending 上游「现在领不到」的业务码：不是失败，下一轮自然会再试。
+// 9069/9090 活动暂不可用（两条链路各一个）/ 9070 暂无领取权限。
+func grantPending(code int) bool { return code == 9069 || code == 9090 || code == 9070 }
+
+// workExtra 领取结论只在这一个对象里（activity/action 的响应）。
+// 实测 2026-10-19：granted=true + grantable=false = 这个号已经领过了；
+// prize_text 是上游给的中文结果（券名 / 「明天再来」），不是我们编的。
+type workExtra struct {
+	Grantable bool   `json:"grantable"`
+	Granted   bool   `json:"granted"`
+	PrizeText string `json:"prize_text"`
+}
+
+// ugPost 打一条 ug 接口并解出业务码与 work_extra。REST 层永远回 200，结论只能看 code。
+func (c *Client) ugPost(a *auth.Auth, path, body string) (code int, msg string, we workExtra, err error) {
+	req, err := http.NewRequest(http.MethodPost, c.ugBase()+path, strings.NewReader(body))
+	if err != nil {
+		return 0, "", we, err
+	}
+	UgHeaders(req, a)
+	data, err := c.doJSON(req)
+	if err != nil {
+		return 0, "", we, err
+	}
+	var r struct {
+		Code      int       `json:"code"`
+		Message   string    `json:"message"`
+		Msg       string    `json:"msg"`
+		WorkExtra workExtra `json:"work_extra"`
+	}
+	if err := json.Unmarshal(data, &r); err != nil {
+		return 0, "", we, fmt.Errorf("%s parse: %w", path, err)
+	}
+	return r.Code, checkinMsg(r.Message, r.Msg), r.WorkExtra, nil
+}
+
+// ClaimActivities 领取当前可领的活动/权益（借鉴 workbuddy-3in1 的 Trae 链路）。
+//
+// 三条链路（2026-10-19 对 5 个真号实测，两个 host 交叉验证过，只有 api.trae.cn 上有）：
+//   - activity_type==103 的裂变奖励必须带 activity_id 单独领（传 activity_type 一律 4001）；
+//   - 其余活动走 activity/action：它是唯一会回 work_extra（granted/grantable/prize_text）的
+//     接口，实测 checkin_1024 这类券活动能领、也能读出「已领」；
+//   - grant_work_benefit 是兜底的总入口（服务端按账号可领清单自行发放），覆盖 action
+//     不认的那几类（新人/发消息/学生认证/桌面下载）。
+//
+// 返回的 notes 只写「哪条、什么结论」，不写积分数字——响应体里没有可信的到账额度。
+// 领不到的（grantPending）不进 notes，只留日志，避免每天刷同样的噪音。
+func (c *Client) ClaimActivities(a *auth.Auth) ([]string, error) {
+	if a != nil && a.Realm() == auth.RealmIntl {
+		return nil, ErrNoIntlUG // 国际域没有 ug 接口（同签到）
+	}
+	var notes []string
+	var errs []error
+	acts, aerr := c.activityList(a)
+	if aerr != nil {
+		errs = append(errs, aerr)
+	}
+	now := time.Now().UnixMilli()
+	for _, x := range acts {
+		if !x.Enabled || (x.Start != 0 && now < x.Start) || (x.End != 0 && now > x.End) {
+			continue
+		}
+		if x.Type == 103 {
+			gcode, gmsg, _, gerr := c.ugPost(a, EpFissionGrant, `{"activity_id":"`+x.ID+`","req_source":1}`)
+			switch {
+			case gerr != nil:
+				errs = append(errs, fmt.Errorf("%s: %w", x.ID, gerr))
+			case gcode == 0:
+				notes = append(notes, x.ID+" 已领")
+			case grantPending(gcode):
+				log.Printf("[grant] %s %s: code=%d %s（现在领不到）", a.UID, x.ID, gcode, gmsg)
+			default:
+				notes = append(notes, fmt.Sprintf("%s code=%d %s", x.ID, gcode, gmsg))
+			}
+			continue
+		}
+		acode, amsg, we, aerr := c.ugPost(a, EpActivityAction, `{"activity_id":"`+x.ID+`","req_source":1}`)
+		switch {
+		case aerr != nil:
+			errs = append(errs, fmt.Errorf("%s: %w", x.ID, aerr))
+		case acode == 0 && we.Granted:
+			notes = append(notes, x.ID+" 已领"+prizeSuffix(we.PrizeText))
+		case acode == 0:
+			// 受理但没有 work_extra（student_auth_reward 实测如此）：没有可报的结论。
+		case grantPending(acode):
+			log.Printf("[grant] %s %s: code=%d %s（现在领不到）", a.UID, x.ID, acode, amsg)
+		default:
+			notes = append(notes, fmt.Sprintf("%s code=%d %s", x.ID, acode, amsg))
+		}
+	}
+	// 兜底总入口：action 不认的那几类活动靠它。
+	bcode, bmsg, _, berr := c.ugPost(a, EpGrantBenefit, `{"trae_client":"Lite","device_id":"`+UGDeviceID(a)+`"}`)
+	switch {
+	case berr != nil:
+		errs = append(errs, fmt.Errorf("权益领取: %w", berr))
+	case bcode == 0:
+		notes = append(notes, "权益已领")
+	case grantPending(bcode):
+		log.Printf("[grant] %s 权益: code=%d %s（现在领不到）", a.UID, bcode, bmsg)
+	default:
+		notes = append(notes, fmt.Sprintf("权益 code=%d %s", bcode, bmsg))
+	}
+	if len(errs) > 0 {
+		return notes, errors.Join(errs...)
+	}
+	return notes, nil
+}
+
+func prizeSuffix(p string) string {
+	if p == "" {
+		return ""
+	}
+	return "（" + p + "）"
+}
+
+// activityRow 活动清单里的一条（只有它能给出 activity_id + 类型 + 有效期）。
+type activityRow struct {
+	ID      string `json:"activity_id"`
+	Type    int    `json:"activity_type"`
+	Enabled bool   `json:"Enabled"`
+	Start   int64  `json:"start_time_ms"`
+	End     int64  `json:"end_time_ms"`
+}
+
+// activityList 拉活动清单。
+func (c *Client) activityList(a *auth.Auth) ([]activityRow, error) {
+	req, err := http.NewRequest(http.MethodPost, c.ugBase()+EpActivityInfo, strings.NewReader(ugBody))
+	if err != nil {
+		return nil, err
+	}
+	UgHeaders(req, a)
+	data, err := c.doJSON(req)
+	if err != nil {
+		return nil, fmt.Errorf("活动清单: %w", err)
+	}
+	var r struct {
+		Activities []activityRow `json:"commercial_activities"`
+	}
+	if err := json.Unmarshal(data, &r); err != nil {
+		return nil, fmt.Errorf("活动清单 parse: %w", err)
+	}
+	return r.Activities, nil
+}
+
 // entUsageBody 积分接口请求体。用**客户端自己的形状**，不是空体：
 // 客户端自带 SDK（`GetIdeUserEntUsageV2`）发的是 {require_usage, req_source, full_data, Request}，
 // 调用点默认 {require_usage:true, req_source:1, full_data:true}（NextAgentX/trae-workbuddy-switch

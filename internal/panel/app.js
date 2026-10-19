@@ -1801,6 +1801,9 @@ function checkinMsg(rs, accounts) {
     msg = '签到完成，本次没有新增积分';
   }
   if (ok.length && already) msg += '，另有 ' + already + ' 个今天已签';
+  // 活动/权益领取的结论（每天一次）：只报「哪条、什么结果」，接口没给可信到账额度。
+  const grants = rs.map(r => r.grants).filter(Boolean);
+  if (grants.length) msg += '｜活动：' + grants.join('；');
   return msg;
 }
 
@@ -1882,8 +1885,10 @@ function checkinMsg(rs, accounts) {
     try {
       const r = await api('accounts/' + encodeURIComponent(u) + '/' + a, { method: 'POST', body: '{}' });
       if (a === 'checkin') {
-        toast(r.status === 'already' ? '今天已经签过了'
-          : (r.earned ? '签到完成 +' + r.earned + ' 分' : '签到完成，本次没有新增积分'), 'ok');
+        let m = r.status === 'already' ? '今天已经签过了'
+          : (r.earned ? '签到完成 +' + r.earned + ' 分' : '签到完成，本次没有新增积分');
+        if (r.grants) m += '｜活动：' + r.grants;
+        toast(m, 'ok');
       } else if (a === 'balance') {
         // 单号刷新：按账号自己的口径回报，美元号不能回一个 0 积分。
         const acc = r.account;
