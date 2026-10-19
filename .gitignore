@@ -17,6 +17,7 @@ config.json
 # 文档(doc 排除上传): 本地 md 不入库,README 除外
 *.md
 !README.md
+!AGENTS.md
 # 内置提示词是 go:embed 的构建输入，必须入库，否则 clone 下来编译不了
 !internal/prompt/defaultprompt.md
 docs/
