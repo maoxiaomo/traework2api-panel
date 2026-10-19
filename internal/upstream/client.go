@@ -289,6 +289,11 @@ func identFor(a *auth.Auth) (version, versionCode string) {
 	return currentIdeVersion(), IdeVersionCode
 }
 
+// maxJSONBody 上游 JSON 响应上限。8MB：模型目录表（batch_get_detail_param）随模型数
+// 单调增长；早先 1MB 会把「响应变大」伪装成 json.Unmarshal 的 "unexpected end of
+// JSON input"，日志里分不清是截断还是上游坏了（同 workbuddy-3in1 的补丁 0005）。
+const maxJSONBody = 8 << 20
+
 // doJSON 发请求并解 JSON；HTTP 非 2xx 时返回带 body 片段的 *Error。
 func (c *Client) doJSON(req *http.Request) (json.RawMessage, error) {
 	c.timeoutMu.RLock()
@@ -298,7 +303,15 @@ func (c *Client) doJSON(req *http.Request) (json.RawMessage, error) {
 		return nil, err
 	}
 	defer resp.Body.Close()
-	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	// 多读 1 字节判定超限：截断的 body 交给 json.Unmarshal 只会得到语法错误，
+	// 且读取过程中断（连接被掐）也必须报出来，不能当成「上游返回了半截 JSON」。
+	raw, rerr := io.ReadAll(io.LimitReader(resp.Body, maxJSONBody+1))
+	if rerr != nil {
+		return nil, fmt.Errorf("读取上游响应中断（%d 字节已收）: %w", len(raw), rerr)
+	}
+	if len(raw) > maxJSONBody {
+		return nil, fmt.Errorf("上游响应超过 %d 字节上限，放弃解析", maxJSONBody)
+	}
 	if resp.StatusCode >= 400 {
 		kind := Classify(resp.StatusCode, string(raw))
 		return nil, &Error{Kind: kind, Status: resp.StatusCode, Msg: truncate(string(raw), 200)}
