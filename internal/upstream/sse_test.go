@@ -304,6 +304,37 @@ func TestStreamLengthNotMaskedByToolCalls(t *testing.T) {
 	}
 }
 
+// 非流式路径同一处上游伪装：聚合出的 response 也必须报 tool_calls，
+// 否则只用非流式的客户端（--no-stream / SDK 默认）拿到的仍是 stop，工具不执行。
+func TestAggregateToolCallsFinishReason(t *testing.T) {
+	toolSSE := "event:output\ndata:{\"response\":\"\",\"tool_calls\":[{\"id\":\"call_1\",\"function_call\":{\"name\":\"echo\",\"arguments\":\"{}\"}}]}\n\n" +
+		"event:done\ndata:{\"finish_reason\":\"stop\"}\n\n"
+	resp, err := Aggregate(strings.NewReader(toolSSE))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ch := resp["choices"].([]any)[0].(map[string]any)
+	if ch["finish_reason"] != "tool_calls" {
+		t.Errorf("finish_reason=%v want tool_calls", ch["finish_reason"])
+	}
+	if ch["message"].(map[string]any)["tool_calls"] == nil {
+		t.Error("tool_calls 应保留在 message 里")
+	}
+}
+
+// 空数组 tool_calls 不算工具回合：纯文本回复必须仍报 stop，不能被误改成 tool_calls。
+func TestStreamEmptyToolCallsStaysStop(t *testing.T) {
+	raw := "event:output\ndata:{\"response\":\"你好\",\"tool_calls\":[]}\n\n" +
+		"event:done\ndata:{\"finish_reason\":\"stop\"}\n\n"
+	rec := httptest.NewRecorder()
+	if err := Stream(rec, strings.NewReader(raw)); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(rec.Body.String(), `"finish_reason":"stop"`) {
+		t.Errorf("空 tool_calls 不该改成 tool_calls: %q", rec.Body.String())
+	}
+}
+
 func TestPrepareBodyToolsParametersStringified(t *testing.T) {
 	src := `{"model":"glm-5.2","messages":[{"role":"user","content":"hi"}],"tools":[{"type":"function","function":{"name":"get_weather","description":"weather","parameters":{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}}}]}`
 	out := PrepareBody([]byte(src))

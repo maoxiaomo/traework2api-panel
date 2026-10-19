@@ -309,6 +309,11 @@ func Aggregate(r io.Reader) (map[string]any, error) {
 			calls = append(calls, toolCalls[idx])
 		}
 		message["tool_calls"] = calls
+		// 同一处上游伪装，聚合路径也要改（见 streamOpts 的 done 分支）：
+		// 非流式客户端拿到 stop 同样不会执行工具，只修流式等于没修一半。
+		if finishReason == "" || finishReason == "stop" {
+			finishReason = "tool_calls"
+		}
 	}
 	resp := map[string]any{
 		"id":      id,
@@ -578,7 +583,11 @@ func streamOpts(w http.ResponseWriter, r io.Reader, onErr func(*SOLOStreamError)
 							}
 						}
 						delta["tool_calls"] = tc
-						sawToolCalls = true
+						// 空数组不算「见过工具调用」：否则一个纯文本回合也会被改成
+						// tool_calls，正好和下面 done 分支的改写意图相反。
+						if len(tc) > 0 {
+							sawToolCalls = true
+						}
 					}
 				}
 				if len(delta) > 0 {
