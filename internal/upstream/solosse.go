@@ -479,6 +479,7 @@ func streamOpts(w http.ResponseWriter, r io.Reader, onErr func(*SOLOStreamError)
 	sawDone := false
 	sawModel := false     // 见过 output 事件（正文/思考/工具任一）
 	sawToolCalls := false // output 里见过工具调用：done 帧据此修正被上游伪装的 finish_reason
+	errSent := false      // 已写过 error 帧：之后再来的 output/done 一律不再写
 	st := &sseState{}
 	writeChunk := func(delta map[string]any, finish string) error {
 		chunk := map[string]any{
@@ -560,6 +561,9 @@ func streamOpts(w http.ResponseWriter, r io.Reader, onErr func(*SOLOStreamError)
 		if ev := scanLine(st, strings.TrimRight(line, "\r\n")); ev != nil {
 			switch ev.Event {
 			case "output":
+				if errSent {
+					break // 已写过 error 帧，后面的正文不再追加
+				}
 				delta := map[string]any{}
 				if ev.Response != "" {
 					delta["content"] = ev.Response
@@ -599,6 +603,11 @@ func streamOpts(w http.ResponseWriter, r io.Reader, onErr func(*SOLOStreamError)
 			case "token_usage":
 				pendingUsage, lastUsage = ev.Usage, ev.Usage
 			case "done":
+				// 已写过 error 帧（error 分支自己也写了 [DONE]）：上游随后再补一个 done
+				// 会变成第二套收尾帧（agent2api 记录过这个形状）。只留第一套。
+				if errSent {
+					break
+				}
 				// SOLO 的 done 帧恒报 finish_reason:"stop"，即使模型发起了工具调用
 				// （continue.go 顶部也记着这条上游行为）。原样透传会让下游以为回合已
 				// 正常结束、不执行工具，表现为“话说一半没了”。见过 tool_calls 时把
@@ -628,6 +637,7 @@ func streamOpts(w http.ResponseWriter, r io.Reader, onErr func(*SOLOStreamError)
 					return lastUsage, err
 				}
 				sawDone = true
+				errSent = true // 收尾帧已发出，后面的 output/done 都不再写
 			}
 		}
 		if err == io.EOF {

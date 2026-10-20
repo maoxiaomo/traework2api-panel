@@ -402,8 +402,9 @@ func (c *Client) refreshLocked(a *auth.Auth) error {
 	}
 	var resp struct {
 		Result struct {
-			Token               string `json:"Token"`
-			TokenExpireAt       int64  `json:"TokenExpireAt"`
+			Token         string `json:"Token"`
+			TokenExpireAt any    `json:"TokenExpireAt"` // 见 msField：上游两种形状都在用
+			// 下面两个按数字解析：只见过数字形态，不做额外兼容。
 			TokenExpireDuration int64  `json:"TokenExpireDuration"`
 			RefreshToken        string `json:"RefreshToken"`
 			RefreshExpireAt     int64  `json:"RefreshExpireAt"`
@@ -420,12 +421,26 @@ func (c *Client) refreshLocked(a *auth.Auth) error {
 		a.RefreshToken = resp.Result.RefreshToken
 	}
 	// 过期时间：优先 TokenExpireAt（上游返回毫秒，需归一化为 Unix 秒）
-	if resp.Result.TokenExpireAt > 0 {
-		a.ExpiresAt = normalizeExpiresAt(resp.Result.TokenExpireAt)
+	if ms := msField(resp.Result.TokenExpireAt); ms > 0 {
+		a.ExpiresAt = normalizeExpiresAt(ms)
 	} else if resp.Result.TokenExpireDuration > 0 {
 		a.ExpiresAt = time.Now().Add(time.Duration(resp.Result.TokenExpireDuration) * time.Second).Unix()
 	}
 	return nil
+}
+
+// msField 取毫秒时间戳字段：数字与字符串都在用（agent2api 实测中国版回的是字符串）。
+// 按 int64 解析会把整条换票响应判成解析失败 → 票不落盘 → 连续 401 后被判定失效，
+// 一个形状变化就能让全池账号掉线，所以这一处宽容。
+func msField(v any) int64 {
+	switch x := v.(type) {
+	case float64:
+		return int64(x)
+	case string:
+		n, _ := strconv.ParseInt(strings.TrimSpace(x), 10, 64)
+		return n
+	}
+	return 0
 }
 
 // normalizeExpiresAt 把 ExchangeToken 的 TokenExpireAt 归一化为 Unix 秒。
