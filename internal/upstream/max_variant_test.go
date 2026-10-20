@@ -185,3 +185,37 @@ func TestMergeCatalogCarriesVariantNames(t *testing.T) {
 		t.Errorf("kimi-k3 合并后应可 Max: max=%q avail=%v", v.MaxModelName, v.MaxAvailable())
 	}
 }
+
+// TestMergeCatalogDoesNotEraseSingleViewMax 批量视图那条目「没这份数据」时不能把单视图的 Max 清掉。
+//
+// 真实成因（2026-10-20 现场）：国服批量报文本体 1.56MB，超出当时 1MB 的读上限，整表退回
+// 单 function 视图（那条路自己会带 context_window_tokens.max 与 __max 名）。批量视图里一部分
+// 面的条目（solo_work_lite / solo_coder 全表 max==dev）本身就不声明更大的 max、也没有 __max
+// 名——无条件覆盖会把「这条没有」当成「这里没有」，MaxAvailable() 从 true 翻 false，
+// 表象是某些模型的 Max 开关凭空消失，而且只按模型丢，不是整表丢。
+func TestMergeCatalogDoesNotEraseSingleViewMax(t *testing.T) {
+	// 单视图：上游老接口如实给了 max 口径与 __max 变体名。
+	list := []ModelInfo{{
+		ID: "glm-5.2", Name: "GLM-5.2", Function: Function,
+		ContextWindow: 200000, ContextMax: 1000000,
+		DevModelName: "glm-5.2__dev", MaxModelName: "glm-5.2__max",
+	}}
+	// 批量视图：这条只有 dev 口径，没有 max、没有变体名（solo_work_lite 面的真实形状）。
+	cat := map[string]catalogMeta{
+		"glm-5.2": {ID: "glm-5.2", Visible: true, Label: "GLM-5.2", Dev: 200000, Max: 0},
+	}
+	got := mergeCatalog(list, cat, nil)
+	m := got[0]
+	if m.ContextMax != 1000000 {
+		t.Errorf("批量视图没给 max 却把单视图的 Max 清成了 %d（应保留 1000000）", m.ContextMax)
+	}
+	if m.MaxModelName != "glm-5.2__max" {
+		t.Errorf("批量视图没给变体名却清空了 MaxModelName（得到 %q）", m.MaxModelName)
+	}
+	if !m.MaxAvailable() {
+		t.Error("合并后 MaxAvailable() 应为 true——这正是「某些模型 Max 开关消失」的形态")
+	}
+	if m.ContextWindow != 200000 {
+		t.Errorf("dev 口径被改成了 %d", m.ContextWindow)
+	}
+}

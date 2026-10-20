@@ -874,9 +874,21 @@ func mergeCatalog(list []ModelInfo, cat map[string]catalogMeta, a *auth.Auth) []
 		if m.Dev > 0 {
 			list[i].ContextWindow = m.Dev
 		}
-		list[i].ContextMax = m.Max
-		// 变体名以批量视图（客户端选择器）为准：它才是权威那份。
-		list[i].DevModelName, list[i].MaxModelName = m.DevName, m.MaxName
+		// Max 口径与变体名同样「批量视图有值才覆盖」：上游某些面（solo_work_lite / solo_coder）
+		// 的条目压根不带 context_window_tokens.max，也没有 __max 名。无条件写入会把单 function
+		// 视图刚取到的 1M 与 __max 名一起清成 0/空，MaxAvailable() 从 true 翻成 false。
+		// 失败表象是「某个模型的 Max 开关凭空消失」，而且是按模型逐个丢，不是整表丢，
+		// 极难归因——宁可留着单视图的值（那也是上游给的），也不拿一份没这份数据的视图去清它。
+		if m.Max > 0 {
+			list[i].ContextMax = m.Max
+		}
+		// 变体名以批量视图（客户端选择器）为准：它才是权威那份；但它没给名字时不清空。
+		if m.DevName != "" {
+			list[i].DevModelName = m.DevName
+		}
+		if m.MaxName != "" {
+			list[i].MaxModelName = m.MaxName
+		}
 		if m.HasRate {
 			r := m.Rate
 			list[i].Rate = &r
