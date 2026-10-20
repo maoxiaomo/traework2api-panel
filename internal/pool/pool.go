@@ -17,7 +17,9 @@ package pool
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"log"
 	"math/rand/v2"
 	"os"
@@ -27,6 +29,7 @@ import (
 	"time"
 
 	"traework2api/internal/auth"
+	"traework2api/internal/durable"
 )
 
 // CoolKind 冷却类型。
@@ -1006,20 +1009,27 @@ func (p *Pool) statusOf(uid string, e *entry) Status {
 // ---------------------------------------------------------------------------
 
 func (p *Pool) load() {
-	raw, err := os.ReadFile(p.stateFp)
+	// 读不出来时回落到 state.json.bak（上一代好副本）：坏文件不等于「全池没有账号」。
+	raw, note, err := durable.Read(p.stateFp, validStateFile)
 	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return // 首次启动
+		}
+		// 两边都读不出来 = 未知，不是空。备份现场再重建：上一次保存留下的好文件
+		// 不会被下一次保存盖掉。
+		bak := p.stateFp + ".corrupt"
+		if rerr := os.Rename(p.stateFp, bak); rerr != nil {
+			log.Printf("[pool] state %s 读不出来且备份失败(%v)，本轮按空状态启动: %v", p.stateFp, rerr, err)
+			return
+		}
+		log.Printf("[pool] state %s 读不出来（%v），已备份为 %s 并按空状态启动（禁用/冷却/积分需重新累积）", p.stateFp, err, bak)
 		return
+	}
+	if note != "" {
+		log.Printf("[pool] %s", note)
 	}
 	var sf stateFile
 	if err := json.Unmarshal(raw, &sf); err != nil {
-		// 静默从零点开始 = 禁用/冷却/积分全丢，还看不出发生过什么。
-		// 备份现场再重建：上一次保存留下的好文件不会被下一次保存盖掉。
-		bak := p.stateFp + ".corrupt"
-		if rerr := os.Rename(p.stateFp, bak); rerr != nil {
-			log.Printf("[pool] state %s 解析失败且备份失败(%v)，本轮按空状态启动: %v", p.stateFp, rerr, err)
-			return
-		}
-		log.Printf("[pool] state %s 解析失败（%v），已备份为 %s 并按空状态启动（禁用/冷却/积分需重新累积）", p.stateFp, err, bak)
 		return
 	}
 	for uid, s := range sf.Accounts {
@@ -1080,7 +1090,19 @@ func (p *Pool) saveLocked() {
 		log.Printf("[pool] 状态落盘失败（冷却/禁用标记可能在重启后丢失）: %v", err)
 		return
 	}
+	// 覆盖前留上一代：状态盘坏掉时不必从零点重新累积。
+	if err := durable.Keep(p.stateFp, validStateFile); err != nil {
+		log.Printf("[pool] 上一代状态备份失败，本轮不覆盖主文件: %v", err)
+		_ = os.Remove(tmp)
+		return
+	}
 	if err := os.Rename(tmp, p.stateFp); err != nil {
 		log.Printf("[pool] 状态替换失败（同上）: %v", err)
 	}
+}
+
+// validStateFile 状态文件可用口径：能解析成 stateFile 才算（半截 JSON 不算）。
+func validStateFile(b []byte) bool {
+	var sf stateFile
+	return json.Unmarshal(b, &sf) == nil
 }

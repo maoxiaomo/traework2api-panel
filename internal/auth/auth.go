@@ -13,10 +13,15 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"traework2api/internal/durable"
 )
 
 // tmpSeq 让同一个 auths 文件的临时名在进程内唯一（见 saveAtomicLocked）。
 var tmpSeq atomic.Uint64
+
+// validCredFile 判断一份凭证文件内容是否可用（LoadDir 与 SaveAtomic 共用同一口径）。
+func validCredFile(b []byte) bool { _, err := Parse(b); return err == nil }
 
 // Auth 归一化后的账号凭证。
 //
@@ -296,6 +301,11 @@ func (a *Auth) saveAtomicLocked() error {
 	if err := os.WriteFile(tmp, raw, 0o600); err != nil {
 		return err
 	}
+	// 覆盖前把现在这份留成 .bak：写到一半掉电时，下一次启动还能从上一代把凭证捞回来。
+	if err := durable.Keep(a.FilePath, validCredFile); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
 	if err := os.Rename(tmp, a.FilePath); err != nil {
 		_ = os.Remove(tmp)
 		return err
@@ -319,10 +329,14 @@ func LoadDir(dir string) ([]*Auth, error) {
 			continue
 		}
 		f := filepath.Join(dir, name)
-		raw, err := os.ReadFile(f)
-		if err != nil {
-			log.Printf("[auth] 读不到账号文件 %s，跳过: %v", f, err)
+		// 读不出来时回落到 <file>.bak（上一代好副本），别让一个坏文件等于这个号消失。
+		raw, note, rerr := durable.Read(f, validCredFile)
+		if rerr != nil {
+			log.Printf("[auth] 账号文件 %s 读不出来，跳过: %v", f, rerr)
 			continue
+		}
+		if note != "" {
+			log.Printf("[auth] %s", note)
 		}
 		a, err := Parse(raw)
 		if err != nil {
