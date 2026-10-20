@@ -26,12 +26,12 @@ import (
 type Config struct {
 	Pool         *pool.Pool
 	Upstream     *upstream.Client
-	APIKey       string          // 空 = 不鉴权
-	MaxRotate    int             // 单请求最多换号次数，默认 3
-	RefreshSkew  time.Duration   // token 预刷新窗口，默认 24h
-	DefaultModel string          // 默认 glm-5.2
-	PromptMode   string          // passthrough / custom / append
-	PromptText   string          // custom/append 用的提示词文本
+	APIKey       string        // 空 = 不鉴权
+	MaxRotate    int           // 单请求最多换号次数，默认 3
+	RefreshSkew  time.Duration // token 预刷新窗口，默认 24h
+	DefaultModel string        // 默认 glm-5.2
+	PromptMode   string        // passthrough / custom / append
+	PromptText   string        // custom/append 用的提示词文本
 	// MaxFunction 开启 Max 上下文时把出站 function 换到哪个面（默认 chat_v3）。
 	//
 	// 为什么必须换面：Max 变体只在部分上游面上**声明**了更大的窗口。2026-10-15 全表实测
@@ -340,6 +340,21 @@ func (h *Handler) models(w http.ResponseWriter, r *http.Request) {
 }
 
 // modelList 动态获取模型列表并包装成 OpenAI 格式；失败回退静态表。
+// applyRate 写入基准倍率，并把「倍率 0」翻成显式 free 标记。
+//
+// 上游用把基准倍率压到 0 表示限时免费；倍率 0 本来就在载荷里，但前端用真值判断
+// （0 在 JS 里是假值）会把它渲染成「—」，唯一的信息正好被抹掉。nil = 上游没给，
+// 与「给了 0」是两件事，不能一起当限免。
+func applyRate(entry map[string]any, rate *float64) {
+	if rate == nil {
+		return
+	}
+	entry["credit_rate"] = *rate
+	if *rate == 0 {
+		entry["free"] = true
+	}
+}
+
 func (h *Handler) modelList() []map[string]any {
 	if infos := h.fetchDynamicModels(); len(infos) > 0 {
 		out := make([]map[string]any, 0, len(infos))
@@ -392,9 +407,7 @@ func (h *Handler) modelList() []map[string]any {
 				entry["max_available"] = true
 				entry["max_model"] = mi.MaxModelName
 			}
-			if mi.Rate != nil {
-				entry["credit_rate"] = *mi.Rate
-			}
+			applyRate(entry, mi.Rate)
 			if mi.SupportsImage != nil {
 				entry["supports_image"] = *mi.SupportsImage
 			}

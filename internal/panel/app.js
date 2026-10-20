@@ -311,6 +311,38 @@ function renderAccounts(list) {
   }).join('');
 }
 
+// renderExpiry 积分到期提醒：按「最近到期日」给每号一行，回答「哪天会作废多少、
+// 想用完得日均消耗多少」。数据只用 overview 已经带回来的 credits / expire，
+// 不额外打上游——这一步是纯本地汇总。
+// 美元计费账号（International，credits 恒 0）不入表：两个单位不可换算。
+function renderExpiry(list) {
+  const rows = [];
+  for (const a of (list || [])) {
+    if (isUSD(a)) continue;
+    const remain = Number(a.credits || 0);
+    const exp = Number(a.expire || 0);
+    if (!exp || remain <= 0) continue;
+    // 四舍五入到「天」：向上取整会把 5 小时后到期的说成明天（和日期列矛盾），
+    // 纯向下又会把「整 3 天」说成 2 天；按最近的整天报最接近用户直觉。
+    const days = Math.max(0, Math.round((exp * 1000 - Date.now()) / 86400000));
+    rows.push({ uid: a.uid, remain, exp, days });
+  }
+  rows.sort((x, y) => x.exp - y.exp);
+  const tb = $('expBody');
+  if (!tb) return;
+  tb.innerHTML = !rows.length
+    ? '<tr><td colspan="5"><div class="empty">暂无到期信息（上游没给 expire，或余额已为 0）</div></td></tr>'
+    : rows.map(r => '<tr><td class="who"><div class="nm">' + esc(r.uid) + '</div></td>' +
+        '<td>' + new Date(r.exp * 1000).toLocaleDateString('zh-CN') + '</td>' +
+        '<td class="num">' + (r.days === 0 ? '今天' : r.days === 1 ? '明天' : r.days + ' 天') + '</td>' +
+        '<td class="num">' + fmtNum(r.remain) + '</td>' +
+        '<td class="num">' + fmtNum(Math.ceil(r.remain / Math.max(1, r.days))) + '</td></tr>').join('');
+  if ($('expNote')) {
+    const total = rows.reduce((s, r) => s + r.remain, 0);
+    $('expNote').textContent = rows.length ? rows.length + ' 个账号 · 合计 ' + fmtNum(total) : '—';
+  }
+}
+
 async function loadOverview(quiet) {
   try {
     const d = await api('overview');
@@ -360,6 +392,7 @@ async function loadOverview(quiet) {
     const up = Math.floor(d.uptime_sec || 0);
     $('subMeta').textContent = '运行 ' + (up >= 86400 ? Math.floor(up / 86400) + ' 天 ' : '') +
       Math.floor(up % 86400 / 3600) + ' 时 ' + Math.floor(up % 3600 / 60) + ' 分';
+    renderExpiry(list);
     renderAccounts(list);
   } catch (e) { if (!quiet) toast(e.message, 'err'); }
 }
@@ -442,6 +475,9 @@ function mdSortList(list, f) {
 // 否则搜「视觉」搜不到——那一列已经不显示上游枚举了。
 function mdCaps(m) {
   const out = [];
+  // 限免排最前：「现在白用」比推理/视觉更值得先看到。判据是上游基准倍率为 0
+  // （Go 侧已把 rate==0 转成 free，nil = 上游没给，不算限免）。
+  if (m.free) out.push(['free', '限免', '上游基准倍率 0.00×：现在调用不扣积分（促销结束后上游会恢复原倍率）']);
   if (m.capability === 'reasoning_model') out.push(['ok', '推理']);
   if (m.supports_image) out.push(['warn', '视觉']);
   if (m.max) out.push(['mute', 'Max 上下文']);
@@ -462,7 +498,8 @@ function mdRowHtml(m) {
     '<td>' + thinkCell(m) + '</td>' +
     '<td>' + tag('mute', fnLabel(m.function)) + '</td>' +
     // 倍率：上游基准积分倍率（客户端选择器同源）。没有就是上游没给，显示 — 而不是编一个数。
-    '<td class="num">' + (m.credit_rate ? '<b>' + m.credit_rate.toFixed(2) + '×</b>' : '—') + '</td>' +
+    // 0 是「限免」的合法值，不能用真值判断（否则限免行会掉成 —，唯一的信息正好被抹掉）。
+    '<td class="num">' + (m.credit_rate != null ? '<b>' + m.credit_rate.toFixed(2) + '×</b>' : '—') + '</td>' +
     '<td class="num"' + (m.context_length_max ? ' title="声明口径 max ' + fmtNum(m.context_length_max) + '（本列显示的是 __dev 实际请求口径）"' : '') + '>' +
       (m.context_length ? Math.round(m.context_length / 1000) + 'K' : '—') + '</td>' +
     '<td class="num">' + (m.max_output_tokens ? Math.round(m.max_output_tokens / 1000) + 'K' : '—') + '</td></tr>';
@@ -477,9 +514,11 @@ function renderModels() {
     tb.innerHTML = list.map(m => mdRowHtml(m)).join('');
   }
   const filtered = list.length !== mdAll.length;
+  // 限免是瞬时状态（促销一结束倍率就回原值），计数行也点一下，不用逐行找胶囊。
+  const freeCount = mdAll.filter(m => m.free).length;
   $('mdCount').textContent = !mdAll.length ? ''
-    : filtered ? '命中 ' + list.length + ' / ' + mdAll.length + ' 个模型'
-      : mdAll.length + ' 个模型';
+    : (filtered ? '命中 ' + list.length + ' / ' + mdAll.length + ' 个模型'
+      : mdAll.length + ' 个模型') + (freeCount ? ' · ' + freeCount + ' 个限免' : '');
   $('mdCount').className = filtered ? 'note src-off' : 'note';
 }
 function resetModelFilter() {
