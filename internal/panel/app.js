@@ -315,6 +315,10 @@ function renderAccounts(list) {
 // 想用完得日均消耗多少」。数据只用 overview 已经带回来的 credits / expire，
 // 不额外打上游——这一步是纯本地汇总。
 // 美元计费账号（International，credits 恒 0）不入表：两个单位不可换算。
+// 默认只露最近到期的 3 个号，其余收成一行可展开（同 WorkBuddy 面板）——号多了
+// 这张表会把整屏撑满，而真正要看的就是排在最前的那几个。
+const EXP_HEAD = 3;
+let expOpen = false; // 「其余 N 个账号」是否展开；轮询每轮重建 tbody，靠它恢复
 function renderExpiry(list) {
   const rows = [];
   for (const a of (list || [])) {
@@ -330,17 +334,39 @@ function renderExpiry(list) {
   rows.sort((x, y) => x.exp - y.exp);
   const tb = $('expBody');
   if (!tb) return;
+  const rowHtml = (r, hidden) => '<tr' + (hidden ? ' data-exp-row="rest" hidden' : '') +
+    '><td class="who"><div class="nm">' + esc(r.name) + '</div><div class="id">' + esc(r.uid) + '</div></td>' +
+    '<td>' + new Date(r.exp * 1000).toLocaleDateString('zh-CN') + '</td>' +
+    '<td class="num">' + (r.days === 0 ? '今天' : r.days === 1 ? '明天' : r.days + ' 天') + '</td>' +
+    '<td class="num">' + fmtNum(r.remain) + '</td>' +
+    '<td class="num">' + fmtNum(Math.ceil(r.remain / Math.max(1, r.days))) + '</td></tr>';
+  const rest = rows.slice(EXP_HEAD);
   tb.innerHTML = !rows.length
     ? '<tr><td colspan="5"><div class="empty">暂无到期信息（上游没给 expire，或余额已为 0）</div></td></tr>'
-    : rows.map(r => '<tr><td class="who"><div class="nm">' + esc(r.name) + '</div><div class="id">' + esc(r.uid) + '</div></td>' +
-        '<td>' + new Date(r.exp * 1000).toLocaleDateString('zh-CN') + '</td>' +
-        '<td class="num">' + (r.days === 0 ? '今天' : r.days === 1 ? '明天' : r.days + ' 天') + '</td>' +
-        '<td class="num">' + fmtNum(r.remain) + '</td>' +
-        '<td class="num">' + fmtNum(Math.ceil(r.remain / Math.max(1, r.days))) + '</td></tr>').join('');
+    : rows.slice(0, EXP_HEAD).map(r => rowHtml(r, false)).join('') +
+      (rest.length
+        ? '<tr class="pk-group-summary"><td colspan="5"><button type="button" class="pk-group-toggle"' +
+          ' data-exp-rest="' + rest.length + '" aria-expanded="' + (expOpen ? 'true' : 'false') + '"></button></td></tr>' +
+          rest.map(r => rowHtml(r, !expOpen)).join('')
+        : '');
+  applyExpToggle();
   if ($('expNote')) {
     const total = rows.reduce((s, r) => s + r.remain, 0);
     $('expNote').textContent = rows.length ? rows.length + ' 个账号 · 合计 ' + fmtNum(total) : '—';
   }
+}
+
+// applyExpToggle 按 expOpen 把收纳行落到展开/收起，并改写按钮文案。
+// 渲染重建 innerHTML 后必须调一次，否则轮询会把用户的展开收回。
+function applyExpToggle() {
+  const body = $('expBody');
+  if (!body) return;
+  const btn = body.querySelector('button[data-exp-rest]');
+  if (!btn) return;
+  const n = btn.dataset.expRest;
+  body.querySelectorAll('tr[data-exp-row="rest"]').forEach(row => { row.hidden = !expOpen; });
+  btn.setAttribute('aria-expanded', String(expOpen));
+  btn.textContent = (expOpen ? '收起其余 ' : '其余 ') + n + ' 个账号' + (expOpen ? '' : '，展开');
 }
 
 async function loadOverview(quiet) {
@@ -1962,6 +1988,12 @@ function checkinMsg(rs, accounts) {
   $('mdReset').onclick = resetModelFilter;
 
   $('btnPk').onclick = loadPackages;
+  // 到期提醒的「其余 N 个账号」折叠：委托式（行是渲染时生成的，绑在 tbody 上不会丢）。
+  $('expBody').addEventListener('click', ev => {
+    if (!ev.target.closest('button[data-exp-rest]')) return;
+    expOpen = !expOpen;
+    applyExpToggle();
+  });
   // 逐包明细的「其余未用完 / 已用完」折叠：委托式，行是渲染时生成的也不丢事件。
   $('pkDetail').addEventListener('click', ev => {
     const btn = ev.target.closest('button[data-pk-group]');

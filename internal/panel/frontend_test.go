@@ -126,15 +126,51 @@ assert.strictEqual(orig[0].id, 'cn:kimi-k3', 'mdSortList 不能改动入参');
 // TestExpiryRowShowsNickname 到期提醒的「账号」列要跟账号表一样先显示昵称。
 // 这一格曾直接打印 uid：15 位数字跟上面的「MisakaNo」对不上人，而这里正是要按人
 // 判断「谁的积分先作废」。uid 退成第二行小字，专门解决同昵称两个号的歧义。
+//
+// 顺带钉住收纳：默认只露前 3 个号，其余收进一行（同 WorkBuddy 面板）——
+// 号一多这张表会把整屏撑满，而真正要看的就是排在最前那几个。
 func TestExpiryRowShowsNickname(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("无 node，跳过到期提醒断言")
+	}
 	raw, err := os.ReadFile("app.js")
 	if err != nil {
 		t.Fatal(err)
 	}
-	body := extractJSFunc(t, string(raw), "renderExpiry")
-	for _, want := range []string{"a.nickname || a.uid", "esc(r.name)", `class="id"`} {
-		if !strings.Contains(body, want) {
-			t.Errorf("renderExpiry 里找不到 %q —— 账号列会退回只显示 uid", want)
-		}
+	src := string(raw)
+	// 假 DOM：renderExpiry 只写 innerHTML；applyExpToggle 的 querySelector 返回 null 即早退，
+	// 收纳状态在真实浏览器里由点击改 expOpen 后重进本函数，这里只断言首屏渲染。
+	driver := `
+const assert = require('assert');
+const box = { innerHTML: '', querySelector: () => null, querySelectorAll: () => [] };
+global.$ = (id) => (id === 'expBody' ? box : null);
+global.esc = (s) => String(s == null ? '' : s);
+global.fmtNum = (n) => String(n);
+global.isUSD = (a) => a.realm === 'intl';
+const EXP_HEAD = 3;
+let expOpen = false;
+` + extractJSFunc(t, src, "renderExpiry") + "\n" +
+		extractJSFunc(t, src, "applyExpToggle") + `
+const accts = [];
+for (let i = 1; i <= 5; i++) {
+  accts.push({ uid: 'u' + i, nickname: '昵称' + i, credits: 100 * i, expire: Math.floor(Date.now() / 1000) + i * 86400 });
+}
+accts.push({ uid: 'usd', realm: 'intl', credits: 0, expire: Math.floor(Date.now() / 1000) });
+renderExpiry(accts);
+// 美元号不入表：5 行都来自积分号
+assert.strictEqual((box.innerHTML.match(/class="who"/g) || []).length, 5, '应只有 5 个积分号入表');
+// 昵称在前、uid 在小字里
+assert.ok(box.innerHTML.includes('>昵称1<') && box.innerHTML.includes('>u1<'), '账号列没显示昵称');
+// 只露 3 个：后 2 行带 hidden，收纳按钮报 2
+assert.strictEqual((box.innerHTML.match(/data-exp-row="rest" hidden/g) || []).length, 2, '后 2 行应默认收起');
+assert.ok(box.innerHTML.includes('data-exp-rest="2"'), '收纳按钮应报出被收起的账号数');
+// 3 个以内不出现收纳行（避免空按钮）
+renderExpiry(accts.slice(0, 3));
+assert.ok(!box.innerHTML.includes('data-exp-rest'), '3 个号时不该有收纳行');
+`
+	out, err := exec.Command(node, "-e", driver).CombinedOutput()
+	if err != nil {
+		t.Fatalf("node 断言失败: %v\n%s", err, out)
 	}
 }
