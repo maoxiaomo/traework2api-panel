@@ -333,6 +333,8 @@ var dynamicModelsCache struct {
 	maxVariantByModel map[string]string
 	// paidOnlyByModel 订阅专享模型（上游 identity_list 里没有 Free 身份）：
 	// Free 号调它必回 1005，请求入口就拒，别烧上游也别冷却账号。
+	// 键是 "realm/模型"：同一个名字两个地区档位可以不同（intl:glm-5.2 要订阅、cn:glm-5.2 免费），
+	// 按裸名存会把 intl 的付费身份覆盖掉。
 	paidOnlyByModel map[string]bool
 	fetched         time.Time
 	lastFail        time.Time
@@ -482,6 +484,11 @@ func (h *Handler) fetchDynamicModels() []upstream.ModelInfo {
 			continue
 		}
 		for _, mi := range infos {
+			// 订阅专享按「地区/模型」登记，且必须记在同名去重之前——否则被去重掉的那个地区
+			// 的付费身份就丢了，客户端显式带前缀（intl:glm-5.2）时照样会被放过、拿 1005 罚号。
+			if mi.PaidOnly {
+				paidOnlyByModel[realm+"/"+mi.ID] = true
+			}
 			// 两个地区同名的（如 kimi-k3）只留先到的那个：名字一样，调用哪个号都能出。
 			if seen[mi.ID] {
 				continue
@@ -492,9 +499,6 @@ func (h *Handler) fetchDynamicModels() []upstream.ModelInfo {
 			fnByModel[mi.ID] = mi.Function
 			if mi.PickOnly {
 				pickOnlyByModel[mi.ID] = true
-			}
-			if mi.PaidOnly {
-				paidOnlyByModel[mi.ID] = true
 			}
 			// 只登记「真有更大窗口」的：max_available=false 的模型进不了这张表，
 			// 客户端就算发了 max_context 也只会被如实忽略（不会发一个上游认不出的名字）。
@@ -554,11 +558,11 @@ func (h *Handler) modelMaxVariant(model string) string {
 	return dynamicModelsCache.maxVariantByModel[model]
 }
 
-// modelPaidOnly 该模型是不是订阅专享（上游 identity_list 里没有 Free 身份）。
-func (h *Handler) modelPaidOnly(model string) bool {
+// modelPaidOnly 该模型在该地区是不是订阅专享（上游 identity_list 里没有 Free 身份）。
+func (h *Handler) modelPaidOnly(realm, model string) bool {
 	dynamicModelsCache.RLock()
 	defer dynamicModelsCache.RUnlock()
-	return dynamicModelsCache.paidOnlyByModel[model]
+	return dynamicModelsCache.paidOnlyByModel[realm+"/"+model]
 }
 
 // accountFree 该账号是不是 Free 付费身份。查一次记住，查不到不记（下次还能再试）。
@@ -770,7 +774,7 @@ func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
 	// 12 小时。实测（2026-10-21，单国际号）4 个免费模型连打 4/4 全 200，再打一次
 	// gpt-6.1-sol 就把整个号冷却到次日，剩下 34 个能用的国际模型一起 503。
 	// 计划是按模型给的，罚却是按号罚的，这里把它挡在发请求之前。
-	if h.modelPaidOnly(configName) && !h.realmHasPaidAccount(realm) {
+	if h.modelPaidOnly(realm, configName) && !h.realmHasPaidAccount(realm) {
 		log.Printf("拒绝订阅专享模型 %s：%s 地区没有订阅档账号（Free 号调它必 1005，不罚号）", configName, realm)
 		writeOpenAIError(w, http.StatusForbidden, "model_requires_subscription",
 			"model "+configName+" requires a paid Trae subscription; every account in this realm is a Free plan")
@@ -1023,7 +1027,11 @@ func (h *Handler) noteFailure(uid, model string, kind upstream.ErrKind) {
 		// 冷却整号会把同号上几十个免费模型一起打死——实测国际版一次 1005 → 12h，
 		// 那个号 17 天没成功过一次。入口已按身份拦过（见 chatCompletions），
 		// 这里是 pay_status 查不到时的兜底。
-		if h.modelPaidOnly(model) {
+		realm := ""
+		if a := h.cfg.Pool.AuthByUID(uid); a != nil {
+			realm = a.Realm()
+		}
+		if h.modelPaidOnly(realm, model) {
 			log.Printf("WARN: %s 调订阅专享模型 %s 被上游 1005 拒绝，不罚号", uid, model)
 			return
 		}

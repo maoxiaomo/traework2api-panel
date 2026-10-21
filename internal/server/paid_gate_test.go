@@ -196,3 +196,33 @@ func TestPlanLimitOnFreeModelStillCools(t *testing.T) {
 		t.Fatal("普通模型拿 1005 应该冷却账号，否则账号额度耗尽的号会被反复打")
 	}
 }
+
+// 同名模型两个地区档位不同：intl:glm-5.2 要订阅、cn:glm-5.2 免费（客户端实测：国际版列表里
+// GLM-5.2 带锁）。合并模型表时同名只留先到的那个（cn），付费身份必须按地区单独记，
+// 否则客户端显式写 intl:glm-5.2 会被放过 → 1005 → 又把整个国际号冷 12 小时。
+func TestPaidOnlyIsPerRealm(t *testing.T) {
+	installCatalog(t, upstream.ModelInfo{ID: "glm-5.2", ContextWindow: 200000})
+	// 国际版那份在同名去重里被丢掉了，这里补上 fetchDynamicModels 记在去重之前的那一条。
+	dynamicModelsCache.Lock()
+	dynamicModelsCache.paidOnlyByModel[auth.RealmIntl+"/glm-5.2"] = true
+	dynamicModelsCache.Unlock()
+
+	up := &paidGateUpstream{identity: 0}
+	pool := testPoolWith(
+		&auth.Auth{UID: "cn1", AccessToken: "at1", ExpiresAt: 9999999999},
+		&auth.Auth{UID: "intl1", AccessToken: "at2", ExpiresAt: 9999999999, Domain: "www.trae.ai"},
+	)
+	h := NewHandler(Config{Pool: pool, Upstream: up.client()})
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, chatReq("intl:glm-5.2"))
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("intl:glm-5.2 code=%d body=%s，国际版订阅专享应 403", rec.Code, rec.Body)
+	}
+
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, chatReq("cn:glm-5.2"))
+	if rec.Code != 200 {
+		t.Fatalf("cn:glm-5.2 code=%d body=%s，国内免费不该被国际版的档位连坐", rec.Code, rec.Body)
+	}
+}

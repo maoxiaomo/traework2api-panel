@@ -29,7 +29,7 @@ func installCatalog(t *testing.T, models ...upstream.ModelInfo) {
 			pickOnlyByModel[m.ID] = true
 		}
 		if m.PaidOnly {
-			paidOnlyByModel[m.ID] = true
+			paidOnlyByModel[auth.RealmCN+"/"+m.ID] = true
 		}
 		if m.MaxAvailable() {
 			maxVariantByModel[m.ID] = m.MaxModelName
