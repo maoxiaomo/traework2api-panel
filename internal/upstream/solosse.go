@@ -629,6 +629,17 @@ func streamOpts(w http.ResponseWriter, r io.Reader, onErr func(*SOLOStreamError)
 				if onErr != nil {
 					onErr(se)
 				}
+				// 首包门（照 agent2api forward.rs 的 prefetch_head）：账号级错误落在
+				// 第一帧、且一个字节都还没写给客户端时，把错误交回调用方换号重试。
+				// 上游的额度/凭证失败是 HTTP 200 + 流内 error，直接下发等于让客户端
+				// 拿到「成功但报错」，这一轮连号都不换。请求级错误（4001/4026，
+				// Kind()==ErrNone）不换：换几个号都是同一个答复，只会白打上游。
+				wmu.Lock()
+				early := !committed
+				wmu.Unlock()
+				if early && se.Kind() != ErrNone {
+					return lastUsage, se
+				}
 				msg := fmt.Sprintf("solo error code=%d msg=%s", ev.ErrorCode, ev.ErrorMessage)
 				if err := writeRaw("event: error\n" + "data: " + jsonEscape(msg) + "\n\n"); err != nil {
 					return lastUsage, err

@@ -872,6 +872,16 @@ func (h *Handler) attempt(w http.ResponseWriter, acct *auth.Auth, body []byte, p
 			h.noteUsage(acct.UID, peek.Model, attemptStart, false, nil, tr)
 			return false, serr
 		}
+		// 首包门（照 agent2api forward.rs 的 prefetch_head）：流内错误落在第一帧、
+		// 一个字节都还没写出时，solosse 只把它交回来、不写下发 —— 这次尝试对客户端
+		// 完全透明，换号重试即可（账号已在 onErr 里按分类罚过）。
+		if serr != nil {
+			var se *upstream.SOLOStreamError
+			if errors.As(serr, &se) {
+				h.noteUsage(acct.UID, peek.Model, attemptStart, false, nil, tr)
+				return false, serr
+			}
+		}
 		// 流内 error 事件走 onErr 回调后 serr 仍是 nil，所以成败要看**两处**：返回的 err
 		// 与回调有没有触发过。不看回调会把 1005 记成成功；反过来拿「有没有 token_usage」
 		// 当判据又会把「正文完整但没给 usage」的回复记成失败并解绑会话粘性。

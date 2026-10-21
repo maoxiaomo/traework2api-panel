@@ -148,6 +148,10 @@ func TestChatRotatesOnPlanLimit(t *testing.T) {
 
 // TestChatStreamCooldownOnStreamError 流式请求中上游 event:error（如 5xx/参数错误）
 // 应触发 NoteError 冷却（而非仅透传不冷却）。
+//
+// 单号池里首帧就报错：首包门把这一轮交回轮转，池里没有第二个号 → 503 带原因。
+// 这里**不**再断言「200 + error 事件」：那是首包门之前的行为，客户端会把它当成
+// 一次成功但空回复。
 func TestChatStreamCooldownOnStreamError(t *testing.T) {
 	up := newFakeUpstream(t, func(authz string) (int, string, bool) {
 		return 200, "event:error\ndata:{\"code\":5001,\"message\":\"upstream broke\"}\n\n", true
@@ -157,14 +161,50 @@ func TestChatStreamCooldownOnStreamError(t *testing.T) {
 	req := httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(`{"model":"glm-5.2","stream":true,"messages":[]}`))
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
-	// 流内错误不应中断整个请求的 SSE 输出（仍有 event:error + [DONE]）。
 	body := rec.Body.String()
-	if !strings.Contains(body, "solo error") || !strings.Contains(body, "data: [DONE]") {
-		t.Errorf("body=%q want error event + [DONE]", body)
+	if rec.Code != 503 || !strings.Contains(body, "solo error") {
+		t.Errorf("code=%d body=%q want 503 + 上游原话", rec.Code, body)
+	}
+	if strings.Contains(body, "data: [DONE]") {
+		t.Errorf("首帧错误不该写成一条 SSE 流: %q", body)
 	}
 	st, _ := p.Status("u1")
 	if st.ErrCount == 0 {
 		t.Errorf("stream error should bump errCount: %+v", st)
+	}
+}
+
+// TestChatStreamRotatesOnFirstFrameError 首帧账号级错误（1005）要换号重试：
+// 客户端只该看到第二个号的正常流，第一次尝试一个字节都不该漏出去。
+func TestChatStreamRotatesOnFirstFrameError(t *testing.T) {
+	calls := map[string]int{}
+	up := newFakeUpstream(t, func(authz string) (int, string, bool) {
+		calls[authz]++
+		if authz == "Cloud-IDE-JWT at-bad" {
+			return 200, "event:error\ndata:{\"code\":1005,\"message\":\"plan limit\"}\n\n", true
+		}
+		return 200, soloSSE, true
+	})
+	p := testPoolWith(
+		&auth.Auth{UID: "bad", AccessToken: "at-bad", ExpiresAt: 9999999999},
+		&auth.Auth{UID: "good", AccessToken: "at-good", ExpiresAt: 9999999999},
+	)
+	p.SetCredits("bad", 2000)
+	p.SetCredits("good", 1000)
+	p.SetRandInt64N(func(int64) int64 { return 0 }) // 权重最高的 bad 先上
+	h := NewHandler(Config{Pool: p, Upstream: up})
+	req := httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(`{"model":"glm-5.2","stream":true,"messages":[]}`))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("code=%d body=%s", rec.Code, rec.Body)
+	}
+	if calls["Cloud-IDE-JWT at-bad"] != 1 || calls["Cloud-IDE-JWT at-good"] != 1 {
+		t.Errorf("calls=%v", calls)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, "你好") || strings.Contains(body, "solo error") {
+		t.Errorf("客户端只该看到第二个号的正常流: %q", body)
 	}
 }
 
