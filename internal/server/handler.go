@@ -683,7 +683,12 @@ func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
 	maxOn := peek.MaxContext ||
 		strings.HasSuffix(strings.ToLower(bareModel), "__max")
 	if low := strings.ToLower(bareModel); strings.HasSuffix(low, maxSuffix) {
-		bareModel, maxOn = low[:len(low)-len(maxSuffix)], true
+		// -max 也是模型真名的一部分（Qwen3.8-Max 在上游表里 ID 就叫 qwen3.8-max）。
+		// 剥完不是已知模型就说明它是真名，别剥——剥了会变成不存在的 qwen3.8，直接 400。
+		stripped := low[:len(low)-len(maxSuffix)]
+		if _, known := h.resolveKnownModel(stripped); known {
+			bareModel, maxOn = stripped, true
+		}
 	}
 
 	configName, err := h.mapModel(bareModel, realm)
