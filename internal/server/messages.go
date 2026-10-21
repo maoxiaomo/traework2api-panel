@@ -1,7 +1,8 @@
 // messages.go Anthropic Messages 入站：POST /v1/messages 与 /messages ↔ 现有 chatCompletions。
 // ponytail: 不存会话；客户端每轮带全量 messages。上游 reasoning_content 无 signature，
 // 作为 thinking 块下发展示；客户端回传的 thinking 块丢弃（不触发签名校验）。
-// top_k / cache_control / context_management / betas / count_tokens 上游 chat 没有对应物，丢掉。
+// top_k / cache_control / context_management / betas 上游 chat 没有对应物，丢掉；
+// count_tokens 上游也没有，本地估算（见 countTokens）。
 // 内置服务端工具（web_search / code_execution / bash_* …）没有本地执行器，丢掉并在 system 里写明。
 // usage 缓存字段走 SOLO 直报（cache_read_/cache_creation_input_tokens 原样透出），截断映射 refusal。
 package server
@@ -1120,4 +1121,71 @@ func (w *messagesWriter) emit(event string, payload map[string]any) error {
 	}
 	w.Flush()
 	return nil
+}
+
+// countTokens POST /v1/messages/count_tokens：Anthropic 的输入 token 估算。
+//
+// 上游 chat 没有 count_tokens 端点，这里走**同一个** messagesToChat 再数文本，
+// 保证估算口径与实际发出的请求一致（thinking 块已丢、图片已转 image_url）。
+// 不读账号、不花额度、不记台账。
+func (h *Handler) countTokens(w http.ResponseWriter, r *http.Request) {
+	body, err := readCappedBody(r)
+	if errors.Is(err, errBodyTooLarge) {
+		writeAnthropicError(w, http.StatusRequestEntityTooLarge, "invalid_request_error", "request body exceeds 8MB limit")
+		return
+	}
+	if err != nil {
+		writeAnthropicError(w, http.StatusBadRequest, "invalid_request_error", "read body: "+err.Error())
+		return
+	}
+	chat, err := messagesToChat(body)
+	if err != nil {
+		writeAnthropicError(w, http.StatusBadRequest, "invalid_request_error", err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{"input_tokens": estimateChatTokens(chat)})
+}
+
+// estimateChatTokens 粗估一次 chat 请求的输入 token 数。
+//
+// shortcut: 纯字符启发式（ASCII 0.25、非 ASCII 1.5），不做真实分词；只用于客户端的
+// 上下文预算展示，和上游计费无关。哪天客户端拿它做硬性上限，再换成按模型的 tokenizer。
+func estimateChatTokens(chat []byte) int {
+	var obj map[string]any
+	if json.Unmarshal(chat, &obj) != nil {
+		return 0
+	}
+	n := 0.0
+	var walk func(v any)
+	walk = func(v any) {
+		switch x := v.(type) {
+		case string:
+			for _, ch := range x {
+				if ch > 0x2000 {
+					n += 1.5
+				} else {
+					n += 0.25
+				}
+			}
+		case []any:
+			for _, it := range x {
+				walk(it)
+			}
+		case map[string]any:
+			// 图片按固定 1000 计：base64 长度和 token 数无关，数进去会让估算爆表。
+			if t, _ := x["type"].(string); t == "image_url" || t == "image" {
+				n += 1000
+				return
+			}
+			for _, it := range x {
+				walk(it)
+			}
+		}
+	}
+	walk(obj)
+	if n < 1 {
+		return 1
+	}
+	return int(n + 0.999)
 }

@@ -93,6 +93,10 @@ func NewHandler(cfg Config) *Handler {
 	h.mux.HandleFunc("POST /v1/responses", h.withAuth(h.responses))
 	h.mux.HandleFunc("POST /v1/messages", h.withAnthropicAuth(h.messages))
 	h.mux.HandleFunc("POST /messages", h.withAnthropicAuth(h.messages))
+	// Claude Code 每轮都问一次输入 token 数（上下文预算），上游没有对应端点，
+	// 本地估算；缺这条会回 404，客户端只能退回自己的粗估。
+	h.mux.HandleFunc("POST /v1/messages/count_tokens", h.withAnthropicAuth(h.countTokens))
+	h.mux.HandleFunc("POST /messages/count_tokens", h.withAnthropicAuth(h.countTokens))
 	h.mux.HandleFunc("GET /v1/models", h.withAuth(h.models))
 	h.mux.HandleFunc("GET /status", h.withAuth(h.status))
 	h.mux.HandleFunc("GET /healthz", h.healthz)
