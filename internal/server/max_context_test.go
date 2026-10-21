@@ -279,3 +279,23 @@ func TestModelListPublishesMaxTwin(t *testing.T) {
 		t.Error("没有更大窗口的模型不该有 -max 条目")
 	}
 }
+
+// TestModelNameEndingInMaxNotStripped 真名就以 -max 结尾的模型（Qwen3.8-Max）不能被
+// 当成 Max 档后缀剥掉：剥完是 qwen3.8，mapModel 直接 400 unknown model。
+func TestModelNameEndingInMaxNotStripped(t *testing.T) {
+	qwen := upstream.ModelInfo{ID: "qwen3.8-max", Name: "Qwen3.8-Max", Function: "solo_work_lite",
+		ContextWindow: 200000, ContextMax: 1000000, MaxModelName: "qwen3.8-max__max"}
+	installCatalog(t, maxModel(), qwen)
+
+	// 裸名照原样发出，config_name 也是它自己。
+	got := chatWith(t, Config{}, `{"model":"cn:qwen3.8-max","messages":[{"role":"user","content":"hi"}]}`)
+	if got["model"] != "qwen3.8-max" || got["config_name"] != "qwen3.8-max" {
+		t.Errorf("真名被剥了: model=%v config_name=%v", got["model"], got["config_name"])
+	}
+
+	// 真正的 Max 档（同名再挂一个后缀）仍然要剥一层并开 Max。
+	got = chatWith(t, Config{}, `{"model":"cn:qwen3.8-max-max","messages":[{"role":"user","content":"hi"}]}`)
+	if got["model"] != "qwen3.8-max__max" || got["config_name"] != "qwen3.8-max" {
+		t.Errorf("Max 档没开对: model=%v config_name=%v", got["model"], got["config_name"])
+	}
+}
