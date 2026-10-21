@@ -167,6 +167,7 @@ func ParseSOLOLine(eventName, dataLine string) (*SOLOEvent, error) {
 		}
 	case "token_usage":
 		ev.Usage = raw
+		mirrorOpenAIUsage(raw)
 	case "done":
 		if v, ok := raw["finish_reason"].(string); ok {
 			ev.FinishReason = v
@@ -180,6 +181,25 @@ func ParseSOLOLine(eventName, dataLine string) (*SOLOEvent, error) {
 		}
 	}
 	return ev, nil
+}
+
+// mirrorOpenAIUsage 给 SOLO 的 token_usage 补上 OpenAI 兼容层读的嵌套字段。
+// 上游只报顶层 cache_read_input_tokens / reasoning_tokens，客户端读的是
+// prompt_tokens_details.cached_tokens / completion_tokens_details.reasoning_tokens，
+// 不补就一律显示缓存未命中（issue #3）。就地改写：raw 是每帧新建的 map。
+// 上游报了 0 也照写——0 是「量过、没命中」，缺字段是「没量」。
+func mirrorOpenAIUsage(u map[string]any) {
+	if u == nil {
+		return
+	}
+	if c, ok := u["cache_read_input_tokens"].(float64); ok {
+		u["cached_tokens"] = c
+		u["prompt_cache_hit_tokens"] = c
+		u["prompt_tokens_details"] = map[string]any{"cached_tokens": c}
+	}
+	if r, ok := u["reasoning_tokens"].(float64); ok {
+		u["completion_tokens_details"] = map[string]any{"reasoning_tokens": r}
+	}
 }
 
 // sseState 维护一行 SSE 的 event/data 跨行累积。
