@@ -60,6 +60,10 @@ const maxRow = mdRowHtml({ id: 'cn:glm-5.2-max', name: 'GLM-5.2', context_length
 assert.ok(maxRow.includes('Max 上下文'), 'Max 档行没标记: ' + maxRow);
 const baseRow = mdRowHtml({ id: 'cn:glm-5.2', name: 'GLM-5.2', context_length: 116000 });
 assert.ok(!baseRow.includes('Max 上下文'), '普通行不该有 Max 标记: ' + baseRow);
+// 订阅专享：Free 号调它必 1005，必须能和普通模型区分开
+const paidRow = mdRowHtml({ id: 'intl:gpt-6.1-sol', name: 'GPT-6.1-Sol', paid_only: true });
+assert.ok(paidRow.includes('需订阅'), '订阅专享模型没标记: ' + paidRow);
+assert.ok(!baseRow.includes('需订阅'), '普通模型不该有需订阅标记: ' + baseRow);
 `
 	out, err := exec.Command(node, "-e", driver).CombinedOutput()
 	if err != nil {

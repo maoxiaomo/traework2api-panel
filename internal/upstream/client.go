@@ -525,6 +525,10 @@ type ModelInfo struct {
 	Legacy        bool
 	LegacyWhy     string
 
+	// PaidOnly 上游 identity_list 里没有 Free(0) = 订阅专享：Free 号调它必 1005。
+	// 国内版全表都有 0，只有国际版会置位；取不到 identity_list 时为 false（按可用处理）。
+	PaidOnly bool
+
 	// PickOnly 该模型只在**客户端批量视图**里可见，账号的聊天配置表里没有它。
 	// 出站 body 必须去掉 config_name：实测传 config_name=<自己> 上游回 4001
 	// 「param is invalid」，不传则正常出正文（2026-10-04，glm-5.3-flash / qwen3.8-flash /
@@ -654,6 +658,9 @@ func pickOfficialModels(list []paramConfig, a *auth.Auth, function string) []Mod
 			mi.Thinking = thinkingType(cfg.ModelDetailList[0].ModelExtraConfig)
 		}
 		mi.Capability = cfg.DisplayConfig.ModelCapability
+		if free, known := contactFree(cfg.DisplayContactConfig); known {
+			mi.PaidOnly = !free
+		}
 		if len(cfg.ReasoningEffortConfig) > 0 && string(cfg.ReasoningEffortConfig) != "null" {
 			mi.Effort = string(cfg.ReasoningEffortConfig)
 		}
@@ -723,6 +730,11 @@ type catalogMeta struct {
 	// DevName / MaxName 上游表里两种变体名（model_detail_list[].model_name 原样）。
 	// 见 ModelInfo.DevModelName 的实测说明：**不能由 ID 拼**。
 	DevName, MaxName string
+
+	// PaidOnly 上游 identity_list 里没有 Free（0）= 订阅专享，Free 号调它必 1005。
+	// 国内版全表都有 0，所以只有国际版会置位。上游没给 identity_list 时为 false：
+	// 「不知道」按可用处理，别把可用模型误标成付费。
+	PaidOnly bool
 }
 
 // variantNames 从 model_detail_list 里取两种变体名（表里没有则为空）。
@@ -766,6 +778,35 @@ func contactRate(raw string) (float64, bool) {
 	return m.ConsumptionRate.Data.Rate, m.ConsumptionRate.Data.Rate > 0
 }
 
+// contactFree 从 display_contact_config 里读 access.data.identity_list，
+// 判断这个模型对 Free 身份（0）开不开放。
+//
+// 2026-10-21 实测：国内版 47 条全是 [0 5 1 2 3 100]，人人可用，没有订阅墙；
+// 国际版 gpt-6.1-sol / gpt-6-sol / gpt-6-luna 是 [4 1 2 3]（缺 0）= 订阅专享，
+// 其余是 [0 5 4 1 2 3]。同一张 Free 号实测：后者 4/4 全 200，前者 1005「plan 权益不足」。
+// 上游没给 identity_list 时返回 known=false，不猜。
+func contactFree(raw string) (free, known bool) {
+	if strings.TrimSpace(raw) == "" {
+		return false, false
+	}
+	var m struct {
+		Access struct {
+			Data struct {
+				IdentityList []int `json:"identity_list"`
+			} `json:"data"`
+		} `json:"access"`
+	}
+	if json.Unmarshal([]byte(raw), &m) != nil || len(m.Access.Data.IdentityList) == 0 {
+		return false, false
+	}
+	for _, id := range m.Access.Data.IdentityList {
+		if id == 0 {
+			return true, true
+		}
+	}
+	return false, true
+}
+
 // meta 按客户端选择器的四条尺子判定可见性，并取出倍率/双口径/图片支持。
 // 尺子（缺一条就会多出一批上代或内部条目）：
 //  1. 内部配置黑名单 / 自定义槽位回显；
@@ -796,6 +837,9 @@ func (ci paramConfig) meta() catalogMeta {
 	}
 	if r, ok := contactRate(ci.DisplayContactConfig); ok {
 		m.Rate, m.HasRate = r, true
+	}
+	if free, known := contactFree(ci.DisplayContactConfig); known {
+		m.PaidOnly = !free
 	}
 	if ci.DisplayConfig.Multimodal != nil {
 		m.Image, m.HasImage = *ci.DisplayConfig.Multimodal, true
@@ -908,6 +952,11 @@ func mergeCatalog(list []ModelInfo, cat map[string]catalogMeta, a *auth.Auth) []
 			r := m.Rate
 			list[i].Rate = &r
 		}
+		// 只置位不清零：两个视图的 identity_list 同源，批量视图没给时不该把
+		// 单视图已经判定的「订阅专享」抹掉。
+		if m.PaidOnly {
+			list[i].PaidOnly = true
+		}
 		if m.HasImage {
 			v := m.Image
 			list[i].SupportsImage = &v
@@ -928,7 +977,7 @@ func mergeCatalog(list []ModelInfo, cat map[string]catalogMeta, a *auth.Auth) []
 			continue
 		}
 		mi := ModelInfo{ID: m.ID, Name: m.Label, ContextWindow: m.Dev, ContextMax: m.Max, Function: Function, PickOnly: true,
-			DevModelName: m.DevName, MaxModelName: m.MaxName}
+			DevModelName: m.DevName, MaxModelName: m.MaxName, PaidOnly: m.PaidOnly}
 		if m.HasRate {
 			r := m.Rate
 			mi.Rate = &r

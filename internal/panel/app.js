@@ -507,6 +507,7 @@ function mdCaps(m) {
   if (m.capability === 'reasoning_model') out.push(['ok', '推理']);
   if (m.supports_image) out.push(['warn', '视觉']);
   if (m.max) out.push(['mute', 'Max 上下文']);
+  if (m.paid_only) out.push(['warn', '需订阅', '上游 identity_list 里没有 Free 身份：免费号调它必回 1005「plan 权益不足」']);
   if (m.legacy) out.push(['warn', '上代', m.legacy_reason || '客户端已隐藏，本仓仍放行']);
   return out;
 }

@@ -419,6 +419,11 @@ func (h *Handler) modelList() []map[string]any {
 				entry["legacy"] = true
 				entry["legacy_reason"] = mi.LegacyWhy
 			}
+			// 订阅专享：上游 identity_list 里没有 Free(0)。Free 号调它必 1005，
+			// 面板据此打「需订阅」标记，别让用户以为是自己配错了。
+			if mi.PaidOnly {
+				entry["paid_only"] = true
+			}
 			out = append(out, entry)
 			// Max 档另列一条 <模型>-max：客户端直接选这个名字就能开大窗口，不必发
 			// max_context —— 那个字段在 /v1/responses 与 /v1/messages 的键白名单里会被
