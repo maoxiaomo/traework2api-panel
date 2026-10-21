@@ -15,6 +15,7 @@ func TestAliasModel(t *testing.T) {
 		{"intl", "gpt-4o-mini", "gpt-5.2"},
 		{"intl", "gpt-5.1", "gpt-5.2"},
 		{"cn", "Gpt-4o", "glm-5.2"}, // normalizeModelName 会首字母大写，别名表仍要命中
+		{"intl", "Seed-2.1-Turbo", "Doubao-Seed-2.1-Turbo"}, // 客户端内置列表的名字
 	}
 	for _, c := range cases {
 		got, ok := aliasModel(c.realm, c.in)

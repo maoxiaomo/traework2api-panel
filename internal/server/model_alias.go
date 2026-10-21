@@ -31,6 +31,8 @@ var modelAliases = map[string]map[string]string{
 	auth.RealmCN: {
 		"gpt-4o": "glm-5.2", "gpt-4o-mini": "glm-5.2", "gpt-4.1": "glm-5.2",
 		"gpt-4-turbo": "glm-5.2", "gpt-4": "glm-5.2", "gpt-3.5-turbo": "glm-5.2",
+		// 客户端内置列表写「Seed-2.1-Turbo」，上游真名带 Doubao- 前缀，不映射就 400。
+		"seed-2.1-turbo": "Doubao-Seed-2.1-Turbo",
 	},
 	auth.RealmIntl: {
 		"gpt-4o": "gpt-5.2", "gpt-4o-mini": "gpt-5.2", "gpt-4.1": "gpt-5.2",
