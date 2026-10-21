@@ -75,6 +75,10 @@ type Handler struct {
 	cfg  Config
 	mux  *http.ServeMux
 	rtMu sync.RWMutex
+
+	// paidMu / paidFree 账号 uid → 是否 Free 付费身份（懒查一次，进程内缓存）。
+	paidMu   sync.Mutex
+	paidFree map[string]bool
 }
 
 // NewHandler 构建 handler。
@@ -88,7 +92,7 @@ func NewHandler(cfg Config) *Handler {
 	if cfg.DefaultModel == "" {
 		cfg.DefaultModel = upstream.DefaultConfigName
 	}
-	h := &Handler{cfg: cfg, mux: http.NewServeMux()}
+	h := &Handler{cfg: cfg, mux: http.NewServeMux(), paidFree: map[string]bool{}}
 	h.mux.HandleFunc("POST /v1/chat/completions", h.withAuth(h.chatCompletions))
 	h.mux.HandleFunc("POST /v1/responses", h.withAuth(h.responses))
 	h.mux.HandleFunc("POST /v1/messages", h.withAnthropicAuth(h.messages))
@@ -327,8 +331,11 @@ var dynamicModelsCache struct {
 	// maxVariantByModel 模型 → 上游给的 __max 变体名（**只在真有更大窗口时才登记**）。
 	// 键是裸 config_name，值形如 "glm-5.2__max"（原样取自上游表，不拼）。
 	maxVariantByModel map[string]string
-	fetched           time.Time
-	lastFail          time.Time
+	// paidOnlyByModel 订阅专享模型（上游 identity_list 里没有 Free 身份）：
+	// Free 号调它必回 1005，请求入口就拒，别烧上游也别冷却账号。
+	paidOnlyByModel map[string]bool
+	fetched         time.Time
+	lastFail        time.Time
 }
 
 const (
@@ -465,6 +472,7 @@ func (h *Handler) fetchDynamicModels() []upstream.ModelInfo {
 	fnByModel := map[string]string{}
 	pickOnlyByModel := map[string]bool{}
 	maxVariantByModel := map[string]string{}
+	paidOnlyByModel := map[string]bool{}
 	seen := map[string]bool{}
 	for _, acct := range h.realmReps() {
 		realm := acct.Realm()
@@ -485,6 +493,9 @@ func (h *Handler) fetchDynamicModels() []upstream.ModelInfo {
 			if mi.PickOnly {
 				pickOnlyByModel[mi.ID] = true
 			}
+			if mi.PaidOnly {
+				paidOnlyByModel[mi.ID] = true
+			}
 			// 只登记「真有更大窗口」的：max_available=false 的模型进不了这张表，
 			// 客户端就算发了 max_context 也只会被如实忽略（不会发一个上游认不出的名字）。
 			if mi.MaxAvailable() {
@@ -504,6 +515,7 @@ func (h *Handler) fetchDynamicModels() []upstream.ModelInfo {
 	dynamicModelsCache.fnByModel = fnByModel
 	dynamicModelsCache.pickOnlyByModel = pickOnlyByModel
 	dynamicModelsCache.maxVariantByModel = maxVariantByModel
+	dynamicModelsCache.paidOnlyByModel = paidOnlyByModel
 	dynamicModelsCache.fetched = time.Now()
 	dynamicModelsCache.lastFail = time.Time{}
 	dynamicModelsCache.Unlock()
@@ -540,6 +552,48 @@ func (h *Handler) modelMaxVariant(model string) string {
 	dynamicModelsCache.RLock()
 	defer dynamicModelsCache.RUnlock()
 	return dynamicModelsCache.maxVariantByModel[model]
+}
+
+// modelPaidOnly 该模型是不是订阅专享（上游 identity_list 里没有 Free 身份）。
+func (h *Handler) modelPaidOnly(model string) bool {
+	dynamicModelsCache.RLock()
+	defer dynamicModelsCache.RUnlock()
+	return dynamicModelsCache.paidOnlyByModel[model]
+}
+
+// accountFree 该账号是不是 Free 付费身份。查一次记住，查不到不记（下次还能再试）。
+//
+// 只有请求订阅专享模型时才会走到这里，所以每个账号一生最多问一次 pay_status，
+// 不在热路径上。锁内发 HTTP 是故意的：这能保证 50 个并发请求只问一次上游，
+// 代价是这一个请求多等一次往返（~200ms），而重复问会触发上游 3004 突发限流。
+func (h *Handler) accountFree(a *auth.Auth) bool {
+	h.paidMu.Lock()
+	defer h.paidMu.Unlock()
+	if v, ok := h.paidFree[a.UID]; ok {
+		return v
+	}
+	id, known, err := h.cfg.Upstream.PayIdentity(a)
+	if err != nil || !known {
+		// 不知道就按「不是 Free」放行——老行为，最多的代价是这一次白跑。
+		return false
+	}
+	free := id == 0
+	h.paidFree[a.UID] = free
+	return free
+}
+
+// realmHasPaidAccount 该地区有没有订阅档账号。有的话订阅专享模型还能试它。
+func (h *Handler) realmHasPaidAccount(realm string) bool {
+	for _, st := range h.cfg.Pool.List() {
+		a := h.cfg.Pool.AuthByUID(st.UID)
+		if a == nil || a.Realm() != realm {
+			continue
+		}
+		if !h.accountFree(a) {
+			return true
+		}
+	}
+	return false
 }
 
 // setModelNameInBody 只换出站 model（变体名），config_name 保持裸名不动。
@@ -710,6 +764,19 @@ func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// 订阅专享模型 + 该地区全是 Free 号：入口就拒。
+	//
+	// 上游对这类模型回 1005「plan 权益不足」，而 1005 在老逻辑里是「账号没额度」→ 冷却整号
+	// 12 小时。实测（2026-10-21，单国际号）4 个免费模型连打 4/4 全 200，再打一次
+	// gpt-6.1-sol 就把整个号冷却到次日，剩下 34 个能用的国际模型一起 503。
+	// 计划是按模型给的，罚却是按号罚的，这里把它挡在发请求之前。
+	if h.modelPaidOnly(configName) && !h.realmHasPaidAccount(realm) {
+		log.Printf("拒绝订阅专享模型 %s：%s 地区没有订阅档账号（Free 号调它必 1005，不罚号）", configName, realm)
+		writeOpenAIError(w, http.StatusForbidden, "model_requires_subscription",
+			"model "+configName+" requires a paid Trae subscription; every account in this realm is a Free plan")
+		return
+	}
+
 	// 台账用**解析后的**上游模型名（config_name）：客户端可能发 cn:glm-5.2 或别名，
 	// 按入站原样分桶会把同一个模型在面板上拆成多行，别名还查不到单价（积分显示 —）。
 	// 请求记录（tr.Model）记 realm + 客户端裸名 —— 面板上直接看得出这次走的是国内还是国际，
@@ -861,7 +928,7 @@ func (h *Handler) attempt(w http.ResponseWriter, acct *auth.Auth, body []byte, p
 	if status >= 400 {
 		kind := upstream.Classify(status, string(respBody))
 		h.noteUsage(acct.UID, peek.Model, attemptStart, false, nil, tr)
-		h.noteFailure(acct.UID, kind)
+		h.noteFailure(acct.UID, peek.Model, kind)
 		return false, &upstream.Error{Kind: kind, Status: status, Msg: string(respBody)}
 	}
 
@@ -875,7 +942,7 @@ func (h *Handler) attempt(w http.ResponseWriter, acct *auth.Auth, body []byte, p
 		streamErr := false
 		usg, serr := upstream.StreamWithError(w, cont, func(se *upstream.SOLOStreamError) {
 			streamErr = true
-			h.handleStreamError(acct.UID, se)
+			h.handleStreamError(acct.UID, peek.Model, se)
 		})
 		cont.Close()
 		rc.Close()
@@ -916,7 +983,7 @@ func (h *Handler) attempt(w http.ResponseWriter, acct *auth.Auth, body []byte, p
 		if errors.As(err, &se) {
 			// 流内错误与 HTTP 级错误走同一张分类表（noteFailure），避免两处口径漂移。
 			h.noteUsage(acct.UID, peek.Model, attemptStart, false, nil, tr)
-			h.noteFailure(acct.UID, se.Kind())
+			h.noteFailure(acct.UID, peek.Model, se.Kind())
 			return false, err
 		}
 		if errors.Is(err, upstream.ErrEmptyStream) {
@@ -942,7 +1009,7 @@ func (h *Handler) attempt(w http.ResponseWriter, acct *auth.Auth, body []byte, p
 //   - 5xx → 熔断计数；
 //   - 其余 4xx（参数/404 等）→ 降权计数，不罚号；
 //   - ErrNone（模型/参数问题，如 4001）→ 不记账：与账号无关，写进去只会污染状态。
-func (h *Handler) noteFailure(uid string, kind upstream.ErrKind) {
+func (h *Handler) noteFailure(uid, model string, kind upstream.ErrKind) {
 	switch kind {
 	case upstream.ErrNone:
 		// no-op
@@ -952,6 +1019,14 @@ func (h *Handler) noteFailure(uid string, kind upstream.ErrKind) {
 		// fail-fast 分支）。
 		// no-op
 	case upstream.ErrPlanLimit:
+		// 订阅专享模型对 Free 号必回 1005：这是**模型级**拒绝，不是账号没额度。
+		// 冷却整号会把同号上几十个免费模型一起打死——实测国际版一次 1005 → 12h，
+		// 那个号 17 天没成功过一次。入口已按身份拦过（见 chatCompletions），
+		// 这里是 pay_status 查不到时的兜底。
+		if h.modelPaidOnly(model) {
+			log.Printf("WARN: %s 调订阅专享模型 %s 被上游 1005 拒绝，不罚号", uid, model)
+			return
+		}
 		h.cfg.Pool.CooldownPlan(uid)
 	case upstream.ErrSoftRate:
 		h.cfg.Pool.CooldownSoft(uid, "429 rate limit")
@@ -975,8 +1050,8 @@ func (h *Handler) bindSession(sessKey, uid string) {
 //
 // 与 HTTP 级错误同一张分类表：Kind() 现在能区分「模型/参数问题」（ErrNone，不记账）
 // 与「限流/会话失效/服务端」，所以不再需要"一律按罚号计数"的粗口径。
-func (h *Handler) handleStreamError(uid string, se *upstream.SOLOStreamError) {
-	h.noteFailure(uid, se.Kind())
+func (h *Handler) handleStreamError(uid, model string, se *upstream.SOLOStreamError) {
+	h.noteFailure(uid, model, se.Kind())
 }
 
 // noteUsage 把一次出站尝试记进用量台账。

@@ -1312,6 +1312,37 @@ func (c *Client) ugBaseFor(a *auth.Auth) string {
 	return c.ugBase()
 }
 
+// EpPayStatus 付费身份查询（国内 v1 路径；国际版同路径落在 UgHostIntl）。
+const EpPayStatus = "/trae/api/v1/pay/ide_user_pay_status"
+
+// PayIdentity 账号的付费身份：user_pay_identity 0 = Free，非 0 = 订阅档。
+//
+// 这是「订阅专享模型」拦不拦的唯一依据。额度接口（ide_user_ent_usage，每 5 分钟已经在打）
+// 里**没有**这个字段（2026-10-21 实测两地区都是 is_credits_billing / is_dollar_usage_billing /
+// is_pay_freshman / trial_status，无身份），所以只能单独问一次。
+// 上游没给该字段时 known=false，调用方按「不知道」放行，不猜。
+func (c *Client) PayIdentity(a *auth.Auth) (identity int, known bool, err error) {
+	req, err := http.NewRequest(http.MethodPost, c.ugBaseFor(a)+EpPayStatus, bytes.NewReader([]byte("{}")))
+	if err != nil {
+		return 0, false, err
+	}
+	UgHeaders(req, a)
+	data, err := c.doJSON(req)
+	if err != nil {
+		return 0, false, err
+	}
+	var m struct {
+		Identity *int `json:"user_pay_identity"`
+	}
+	if err := json.Unmarshal(data, &m); err != nil {
+		return 0, false, err
+	}
+	if m.Identity == nil {
+		return 0, false, nil
+	}
+	return *m.Identity, true, nil
+}
+
 // entUsagePack 一个套餐包的原始字段（国内 v2 与国际 v1 同形）。
 //
 // ⚠️ 两个地区**不是同一个口径**，字段名也不同（2026-10-15 实测，两国版本同时抓）：

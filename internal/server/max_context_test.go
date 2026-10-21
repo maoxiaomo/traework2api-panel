@@ -21,11 +21,15 @@ func installCatalog(t *testing.T, models ...upstream.ModelInfo) {
 	fnByModel := map[string]string{}
 	pickOnlyByModel := map[string]bool{}
 	maxVariantByModel := map[string]string{}
+	paidOnlyByModel := map[string]bool{}
 	for _, m := range models {
 		realmByModel[m.ID] = auth.RealmCN
 		fnByModel[m.ID] = m.Function
 		if m.PickOnly {
 			pickOnlyByModel[m.ID] = true
+		}
+		if m.PaidOnly {
+			paidOnlyByModel[m.ID] = true
 		}
 		if m.MaxAvailable() {
 			maxVariantByModel[m.ID] = m.MaxModelName
@@ -37,6 +41,7 @@ func installCatalog(t *testing.T, models ...upstream.ModelInfo) {
 	dynamicModelsCache.fnByModel = fnByModel
 	dynamicModelsCache.pickOnlyByModel = pickOnlyByModel
 	dynamicModelsCache.maxVariantByModel = maxVariantByModel
+	dynamicModelsCache.paidOnlyByModel = paidOnlyByModel
 	dynamicModelsCache.fetched = time.Now()
 	dynamicModelsCache.lastFail = time.Time{}
 	dynamicModelsCache.Unlock()
@@ -44,6 +49,7 @@ func installCatalog(t *testing.T, models ...upstream.ModelInfo) {
 		dynamicModelsCache.Lock()
 		dynamicModelsCache.ids = nil
 		dynamicModelsCache.maxVariantByModel = nil
+		dynamicModelsCache.paidOnlyByModel = nil
 		dynamicModelsCache.fetched = time.Time{}
 		dynamicModelsCache.Unlock()
 	})
