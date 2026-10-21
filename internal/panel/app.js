@@ -325,14 +325,14 @@ function renderExpiry(list) {
     // 四舍五入到「天」：向上取整会把 5 小时后到期的说成明天（和日期列矛盾），
     // 纯向下又会把「整 3 天」说成 2 天；按最近的整天报最接近用户直觉。
     const days = Math.max(0, Math.round((exp * 1000 - Date.now()) / 86400000));
-    rows.push({ uid: a.uid, remain, exp, days });
+    rows.push({ name: a.nickname || a.uid, uid: a.uid, remain, exp, days });
   }
   rows.sort((x, y) => x.exp - y.exp);
   const tb = $('expBody');
   if (!tb) return;
   tb.innerHTML = !rows.length
     ? '<tr><td colspan="5"><div class="empty">暂无到期信息（上游没给 expire，或余额已为 0）</div></td></tr>'
-    : rows.map(r => '<tr><td class="who"><div class="nm">' + esc(r.uid) + '</div></td>' +
+    : rows.map(r => '<tr><td class="who"><div class="nm">' + esc(r.name) + '</div><div class="id">' + esc(r.uid) + '</div></td>' +
         '<td>' + new Date(r.exp * 1000).toLocaleDateString('zh-CN') + '</td>' +
         '<td class="num">' + (r.days === 0 ? '今天' : r.days === 1 ? '明天' : r.days + ' 天') + '</td>' +
         '<td class="num">' + fmtNum(r.remain) + '</td>' +

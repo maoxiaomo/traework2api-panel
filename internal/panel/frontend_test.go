@@ -122,3 +122,19 @@ assert.strictEqual(orig[0].id, 'cn:kimi-k3', 'mdSortList 不能改动入参');
 		t.Fatalf("node 断言失败: %v\n%s", err, out)
 	}
 }
+
+// TestExpiryRowShowsNickname 到期提醒的「账号」列要跟账号表一样先显示昵称。
+// 这一格曾直接打印 uid：15 位数字跟上面的「MisakaNo」对不上人，而这里正是要按人
+// 判断「谁的积分先作废」。uid 退成第二行小字，专门解决同昵称两个号的歧义。
+func TestExpiryRowShowsNickname(t *testing.T) {
+	raw, err := os.ReadFile("app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := extractJSFunc(t, string(raw), "renderExpiry")
+	for _, want := range []string{"a.nickname || a.uid", "esc(r.name)", `class="id"`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("renderExpiry 里找不到 %q —— 账号列会退回只显示 uid", want)
+		}
+	}
+}
