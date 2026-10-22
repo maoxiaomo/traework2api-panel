@@ -983,6 +983,14 @@ func (w *responsesWriter) handleFrame(frame string) error {
 	}
 	payload, ok := strings.CutPrefix(frame, "data: ")
 	if !ok {
+		// "event: error\ndata: {...}" 这种带事件名的帧：只认 "data: " 前缀会把整条错误
+		// 直接吞掉，客户端拿到一条「完成但空」的回复 —— Codex 走的正是这个接口，
+		// 上游 4011 期间它会以为模型什么都没说。取 data 行继续按错误信封处理。
+		if i := strings.Index(frame, "\ndata: "); i >= 0 {
+			payload, ok = frame[i+len("\ndata: "):], true
+		}
+	}
+	if !ok {
 		return nil
 	}
 	var obj map[string]any

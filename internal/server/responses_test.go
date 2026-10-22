@@ -1020,3 +1020,29 @@ func TestResponsesInterruptedStreamEmitsFailed(t *testing.T) {
 		t.Errorf("中断的流不许补 response.completed:\n%s", body)
 	}
 }
+
+// 上游流内错误（4011 这类通道限流）必须让 /v1/responses 回 response.failed。
+// 内层错误帧是 "event: error\ndata: {...}" 两行，只认 "data: " 前缀会把整条错误吞掉，
+// Codex 拿到一条「完成但空」的回复 —— 实测 intl 的 coder 通道模型就是这个表现。
+func TestResponsesStreamUpstreamErrorFrame(t *testing.T) {
+	const raw = "event:output\ndata:{\"response\":\"AAA\"}\n\n" +
+		"event:error\ndata:{\"code\":4011,\"message\":\"exceeded the rate limit\"}\n\n"
+	up := newFakeUpstream(t, func(string) (int, string, bool) { return 200, raw, true })
+	p := testPoolWith(&auth.Auth{UID: "u1", AccessToken: "at1", ExpiresAt: 9999999999})
+	h := NewHandler(Config{Pool: p, Upstream: up})
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("POST", "/v1/responses", strings.NewReader(`{"model":"glm-5.2","input":"hi","stream":true}`))
+	h.ServeHTTP(rec, req)
+
+	body := rec.Body.String()
+	types := sseTypes(body)
+	if !containsStr(types, "response.failed") {
+		t.Fatalf("没有 response.failed，客户端会把这次失败当成功: types=%v", types)
+	}
+	if containsStr(types, "response.completed") {
+		t.Fatalf("失败之后还发了 response.completed: types=%v", types)
+	}
+	if !strings.Contains(body, "4011") {
+		t.Errorf("失败帧里没有上游原话: %s", body)
+	}
+}
