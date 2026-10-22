@@ -76,9 +76,12 @@ type Handler struct {
 	mux  *http.ServeMux
 	rtMu sync.RWMutex
 
-	// paidMu / paidFree 账号 uid → 是否 Free 付费身份（懒查一次，进程内缓存）。
-	paidMu   sync.Mutex
-	paidFree map[string]bool
+	// paidMu 同时护两张表：
+	//   paidFree   账号 uid → 是否 Free 付费身份（懒查一次，进程内缓存）
+	//   planDenied "realm/模型" → 上游真回过 1005 的模型（进程内，不落盘）
+	paidMu     sync.Mutex
+	paidFree   map[string]bool
+	planDenied map[string]bool
 }
 
 // NewHandler 构建 handler。
@@ -92,7 +95,7 @@ func NewHandler(cfg Config) *Handler {
 	if cfg.DefaultModel == "" {
 		cfg.DefaultModel = upstream.DefaultConfigName
 	}
-	h := &Handler{cfg: cfg, mux: http.NewServeMux(), paidFree: map[string]bool{}}
+	h := &Handler{cfg: cfg, mux: http.NewServeMux(), paidFree: map[string]bool{}, planDenied: map[string]bool{}}
 	h.mux.HandleFunc("POST /v1/chat/completions", h.withAuth(h.chatCompletions))
 	h.mux.HandleFunc("POST /v1/responses", h.withAuth(h.responses))
 	h.mux.HandleFunc("POST /v1/messages", h.withAnthropicAuth(h.messages))
@@ -558,11 +561,29 @@ func (h *Handler) modelMaxVariant(model string) string {
 	return dynamicModelsCache.maxVariantByModel[model]
 }
 
-// modelPaidOnly 该模型在该地区是不是订阅专享（上游 identity_list 里没有 Free 身份）。
+// modelPaidOnly 该模型在该地区是不是订阅专享：目录说（identity_list 里没有 Free），
+// 或者上游真回过 1005（h.planDenied）。
 func (h *Handler) modelPaidOnly(realm, model string) bool {
+	key := realm + "/" + model
 	dynamicModelsCache.RLock()
-	defer dynamicModelsCache.RUnlock()
-	return dynamicModelsCache.paidOnlyByModel[realm+"/"+model]
+	known := dynamicModelsCache.paidOnlyByModel[key]
+	dynamicModelsCache.RUnlock()
+	if known {
+		return true
+	}
+	h.paidMu.Lock()
+	defer h.paidMu.Unlock()
+	return h.planDenied[key]
+}
+
+// markPaidOnly 把「上游真的回了 1005」的模型学成订阅专享。
+// 存在 handler 上而不是目录缓存里：目录每小时整体替换，且它是全局状态（测试之间会串）。
+func (h *Handler) markPaidOnly(realm, model, uid string) {
+	key := realm + "/" + model
+	h.paidMu.Lock()
+	h.planDenied[key] = true
+	h.paidMu.Unlock()
+	log.Printf("WARN: %s 调 %s 被上游 1005 拒（模型级权益），已记为订阅专享，不罚号", uid, key)
 }
 
 // accountFree 该账号是不是 Free 付费身份。查一次记住，查不到不记（下次还能再试）。
@@ -1023,19 +1044,17 @@ func (h *Handler) noteFailure(uid, model string, kind upstream.ErrKind) {
 		// fail-fast 分支）。
 		// no-op
 	case upstream.ErrPlanLimit:
-		// 订阅专享模型对 Free 号必回 1005：这是**模型级**拒绝，不是账号没额度。
-		// 冷却整号会把同号上几十个免费模型一起打死——实测国际版一次 1005 → 12h，
-		// 那个号 17 天没成功过一次。入口已按身份拦过（见 chatCompletions），
-		// 这里是 pay_status 查不到时的兜底。
+		// 1005 是**模型级**拒绝（「这个模型的权益你的档没有」），不是账号没额度：
+		// 实测同一账号上，订阅专享模型回 1005 的同时几十个免费模型照常 200
+		// （intl:gpt-6.1-sol、intl:Dola-Seed-2.0-Code 各一次，两次都把整个地区冷了 12h，
+		// 其中一次让国际号 17 天没成功过一次）。
+		// 计划按模型给、罚却按号罚，罚错的代价是整个地区不可用，罚对只省一次失败调用，
+		// 所以一律不罚号：把这个模型学成「该地区订阅专享」，下一轮入口直接 403。
 		realm := ""
 		if a := h.cfg.Pool.AuthByUID(uid); a != nil {
 			realm = a.Realm()
 		}
-		if h.modelPaidOnly(realm, model) {
-			log.Printf("WARN: %s 调订阅专享模型 %s 被上游 1005 拒绝，不罚号", uid, model)
-			return
-		}
-		h.cfg.Pool.CooldownPlan(uid)
+		h.markPaidOnly(realm, model, uid)
 	case upstream.ErrSoftRate:
 		h.cfg.Pool.CooldownSoft(uid, "429 rate limit")
 	case upstream.ErrSessionDead:

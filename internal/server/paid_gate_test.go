@@ -15,10 +15,11 @@ import (
 // paidGateUpstream 假上游：pay_status 回指定身份，聊天路径回一条正常流。
 // 计数用来看「有没有真的去打上游」——订阅专享模型必须一次都不打。
 type paidGateUpstream struct {
-	identity int  // user_pay_identity 的值
-	noPay    bool // true = pay_status 不返回身份字段（模拟上游改结构）
-	chats    int
-	pays     int
+	identity  int  // user_pay_identity 的值
+	noPay     bool // true = pay_status 不返回身份字段（模拟上游改结构）
+	planLimit bool // true = 聊天路径回 1005（模型级权益拒绝）
+	chats     int
+	pays      int
 }
 
 func (f *paidGateUpstream) client() *upstream.Client {
@@ -34,10 +35,14 @@ func (f *paidGateUpstream) client() *upstream.Client {
 				return jsonResp(`{"user_pay_identity":` + itoa(f.identity) + `,"user_pay_identity_str":"x"}`), nil
 			}
 			f.chats++
+			sse := soloSSE
+			if f.planLimit {
+				sse = "event: error\ndata: {\"code\":1005,\"msg\":\"plan limit\"}\n\n"
+			}
 			return &http.Response{
 				StatusCode: 200,
 				Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
-				Body:       io.NopCloser(strings.NewReader(soloSSE)),
+				Body:       io.NopCloser(strings.NewReader(sse)),
 			}, nil
 		})},
 		AgentHost: "https://fake.example",
@@ -180,20 +185,32 @@ func TestPlanLimitOnPaidOnlyModelDoesNotCoolAccount(t *testing.T) {
 	}
 }
 
-// 对照：普通模型拿 1005 仍然要冷却（那是真的没额度/计划到期）。
-func TestPlanLimitOnFreeModelStillCools(t *testing.T) {
+// 对照：普通模型拿 1005 也不罚号（模型级拒绝），但要学成订阅专享：
+// 下一轮入口直接 403，不再打上游。
+func TestPlanLimitOnFreeModelLearnsPaidOnly(t *testing.T) {
 	paidCatalog(t)
 	pool := testPoolWith(&auth.Auth{UID: "u1", AccessToken: "at1", ExpiresAt: 9999999999})
-	up := newFakeUpstream(t, func(string) (int, string, bool) {
-		return 200, "event:error\ndata:{\"code\":1005,\"msg\":\"plan limit\"}\n\n", true
-	})
-	h := NewHandler(Config{Pool: pool, Upstream: up})
+	up := &paidGateUpstream{identity: 0, planLimit: true}
+	h := NewHandler(Config{Pool: pool, Upstream: up.client()})
+
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, chatReq("gpt-5.2"))
-
 	st, _ := pool.Status("u1")
-	if !st.Cooling {
-		t.Fatal("普通模型拿 1005 应该冷却账号，否则账号额度耗尽的号会被反复打")
+	if st.Cooling {
+		t.Fatalf("1005 冷却了账号（%q）：1005 是模型级的，冷整号会把同号上几十个免费模型一起打死", st.Reason)
+	}
+	if !h.modelPaidOnly(auth.RealmCN, "gpt-5.2") {
+		t.Fatal("1005 之后该模型应记为订阅专享，否则下一轮又白打一次上游")
+	}
+
+	before := up.chats
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, chatReq("gpt-5.2"))
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("第二轮 code=%d，期望 403（学成订阅专享后入口拦下）", rec.Code)
+	}
+	if up.chats != before {
+		t.Errorf("第二轮又打了 %d 次上游", up.chats-before)
 	}
 }
 

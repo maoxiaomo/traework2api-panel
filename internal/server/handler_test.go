@@ -117,14 +117,27 @@ func TestChatStreamPassthrough(t *testing.T) {
 }
 
 func TestChatRotatesOnPlanLimit(t *testing.T) {
+	// 只数聊天请求：同一个假上游还要服务模型目录（get_detail_param），
+	// 把它算进来会让「换号了几次」变成「目录拉了几次」。
 	calls := map[string]int{}
-	up := newFakeUpstream(t, func(authz string) (int, string, bool) {
-		calls[authz]++
-		if authz == "Cloud-IDE-JWT at-bad" {
-			return 200, "event:error\ndata:{\"code\":1005,\"message\":\"plan limit\",\"extra\":{\"plan\":2}}\n\n", true
-		}
-		return 200, soloSSE, true
-	})
+	up := &upstream.Client{
+		HTTP: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			authz := r.Header.Get("Authorization")
+			if !strings.Contains(r.URL.Path, "llm_utils_chat") {
+				return &http.Response{StatusCode: 404, Header: http.Header{"Content-Type": []string{"application/json"}},
+					Body: io.NopCloser(strings.NewReader(`{"error":"nope"}`))}, nil
+			}
+			calls[authz]++
+			body := soloSSE
+			if authz == "Cloud-IDE-JWT at-bad" {
+				body = "event:error\ndata:{\"code\":1005,\"message\":\"plan limit\",\"extra\":{\"plan\":2}}\n\n"
+			}
+			return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": []string{"text/event-stream"}},
+				Body: io.NopCloser(strings.NewReader(body))}, nil
+		})},
+		AgentHost: "https://fake.example", UgHost: "https://fake.example",
+		OAuthHost: "https://fake.example", ClientID: upstream.ClientID,
+	}
 	p := testPoolWith(
 		&auth.Auth{UID: "bad", AccessToken: "at-bad", ExpiresAt: 9999999999},
 		&auth.Auth{UID: "good", AccessToken: "at-good", ExpiresAt: 9999999999},

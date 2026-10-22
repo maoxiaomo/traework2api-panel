@@ -142,6 +142,11 @@ func normalizeToolChoice(obj map[string]any) {
 			suppress()
 		case "auto", "required":
 			obj["tool_choice"] = typ
+			// 上游只认 auto（实测 required 与点名都照旧让模型自己决定）：
+			// 假装生效会是「客户端以为强制了、其实没有」的静默失配，至少留一行痕。
+			if typ == "required" {
+				log.Printf("WARN: [upstream] tool_choice=required 上游不支持，模型可能不调工具")
+			}
 		case "function":
 			name := ""
 			if fn, ok := v["function"].(map[string]any); ok {

@@ -501,6 +501,7 @@ func streamOpts(w http.ResponseWriter, r io.Reader, onErr func(*SOLOStreamError)
 	sawToolCalls := false // output 里见过工具调用：done 帧据此修正被上游伪装的 finish_reason
 	errSent := false      // 已写过 error 帧：之后再来的 output/done 一律不再写
 	st := &sseState{}
+	tcSent := map[int]tcSeen{} // 已下发的 id/name：上游会把首帧原样重发（见 dedupeToolCallDelta）
 	writeChunk := func(delta map[string]any, finish string) error {
 		chunk := map[string]any{
 			"id":      id,
@@ -605,6 +606,7 @@ func streamOpts(w http.ResponseWriter, r io.Reader, onErr func(*SOLOStreamError)
 								delete(fn, "namespace")
 								delete(fn, "partial_arguments")
 							}
+							dedupeToolCallDelta(call, tcSent)
 						}
 						delta["tool_calls"] = tc
 						// 空数组不算「见过工具调用」：否则一个纯文本回合也会被改成
@@ -660,8 +662,14 @@ func streamOpts(w http.ResponseWriter, r io.Reader, onErr func(*SOLOStreamError)
 				if early && se.Kind() != ErrNone {
 					return lastUsage, se
 				}
+				// 错误帧要给 OpenAI 的**对象**信封：Agent 侧的 SDK（openai-python 等）
+				// 只在 data 里看到 error 键才会抛 APIError；从前这里发的是裸字符串，
+				// 客户端解析不出任何一个 chunk，于是「上游明确报错」变成了「模型返回空」。
 				msg := fmt.Sprintf("solo error code=%d msg=%s", ev.ErrorCode, ev.ErrorMessage)
-				if err := writeRaw("event: error\n" + "data: " + jsonEscape(msg) + "\n\n"); err != nil {
+				body, _ := json.Marshal(map[string]any{"error": map[string]any{
+					"message": msg, "code": ev.ErrorCode, "type": "upstream_error",
+				}})
+				if err := writeRaw("event: error\n" + "data: " + string(body) + "\n\n"); err != nil {
 					return lastUsage, err
 				}
 				if err := writeDONE(); err != nil {
@@ -698,4 +706,50 @@ func streamOpts(w http.ResponseWriter, r io.Reader, onErr func(*SOLOStreamError)
 func jsonEscape(s string) string {
 	raw, _ := json.Marshal(s)
 	return string(raw)
+}
+
+// tcSeen 某个 index 已下发的 id / name（OpenAI 语义里这两个字段只在首帧出现）。
+type tcSeen struct{ id, name string }
+
+// dedupeToolCallDelta 清掉重复/空的 id、type、name，只留客户端该拼接的部分。
+//
+// 国际版 gpt-5.2 / gpt-5.4 在正常增量之外，末尾会**把首帧原样重发一遍**（id 与 name 再来
+// 一次，arguments 为空）。OpenAI 语义里 name 只在首帧出现、客户端按字符串拼接累计，收到
+// "get_weatherget_weather" 就再也对不上工具表 —— Agent 侧表现为「模型调了个不存在的工具」，
+// 而流式（Agent 唯一走法）全中，非流式聚合是覆盖写所以看不出来。
+//
+// 三种形态都要照顾：原样重发（丢弃）、累积式重发（只补差值）、拆片下发（照旧拼接）。
+func dedupeToolCallDelta(call map[string]any, sent map[int]tcSeen) {
+	idx := 0
+	if v, ok := call["index"].(float64); ok {
+		idx = int(v)
+	}
+	s := sent[idx]
+	if id, _ := call["id"].(string); id == "" || id == s.id {
+		delete(call, "id")
+	} else {
+		s.id = id
+	}
+	if typ, _ := call["type"].(string); typ == "" {
+		delete(call, "type")
+	}
+	if fn, ok := call["function"].(map[string]any); ok {
+		name, _ := fn["name"].(string)
+		switch {
+		case name == "" || name == s.name:
+			delete(fn, "name")
+		case strings.HasPrefix(name, s.name):
+			fn["name"] = strings.TrimPrefix(name, s.name) // 累积式重发：客户端那边已有的前缀不能再发一遍
+			s.name = name
+		default:
+			s.name += name
+		}
+		if args, _ := fn["arguments"].(string); args == "" {
+			delete(fn, "arguments")
+		}
+		if len(fn) == 0 {
+			delete(call, "function")
+		}
+	}
+	sent[idx] = s
 }
