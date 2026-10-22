@@ -81,7 +81,7 @@ type Handler struct {
 	//   planDenied "realm/模型" → 上游真回过 1005 的模型（进程内，不落盘）
 	paidMu     sync.Mutex
 	paidFree   map[string]bool
-	planDenied map[string]bool
+	planDenied map[string]time.Time
 }
 
 // NewHandler 构建 handler。
@@ -95,7 +95,7 @@ func NewHandler(cfg Config) *Handler {
 	if cfg.DefaultModel == "" {
 		cfg.DefaultModel = upstream.DefaultConfigName
 	}
-	h := &Handler{cfg: cfg, mux: http.NewServeMux(), paidFree: map[string]bool{}, planDenied: map[string]bool{}}
+	h := &Handler{cfg: cfg, mux: http.NewServeMux(), paidFree: map[string]bool{}, planDenied: map[string]time.Time{}}
 	h.mux.HandleFunc("POST /v1/chat/completions", h.withAuth(h.chatCompletions))
 	h.mux.HandleFunc("POST /v1/responses", h.withAuth(h.responses))
 	h.mux.HandleFunc("POST /v1/messages", h.withAnthropicAuth(h.messages))
@@ -573,15 +573,19 @@ func (h *Handler) modelPaidOnly(realm, model string) bool {
 	}
 	h.paidMu.Lock()
 	defer h.paidMu.Unlock()
-	return h.planDenied[key]
+	return time.Since(h.planDenied[key]) < planDeniedTTL
 }
+
+// planDeniedTTL 学到「1005 = 订阅专享」的有效期。与模型目录同一量级：
+// 上游可能改了档位（限免活动、放量），永久记着会让一个模型再也调不回来。
+const planDeniedTTL = time.Hour
 
 // markPaidOnly 把「上游真的回了 1005」的模型学成订阅专享。
 // 存在 handler 上而不是目录缓存里：目录每小时整体替换，且它是全局状态（测试之间会串）。
 func (h *Handler) markPaidOnly(realm, model, uid string) {
 	key := realm + "/" + model
 	h.paidMu.Lock()
-	h.planDenied[key] = true
+	h.planDenied[key] = time.Now()
 	h.paidMu.Unlock()
 	log.Printf("WARN: %s 调 %s 被上游 1005 拒（模型级权益），已记为订阅专享，不罚号", uid, key)
 }
