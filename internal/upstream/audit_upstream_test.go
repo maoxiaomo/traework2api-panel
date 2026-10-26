@@ -143,7 +143,7 @@ func TestAuditContinueAfterStreamError(t *testing.T) {
 	cont := NewContinueReader(c, a, body, rc)
 	rr := httptest.NewRecorder()
 	var onErr []*SOLOStreamError
-	_, serr := StreamWithError(rr, cont, func(se *SOLOStreamError) { onErr = append(onErr, se) })
+	_, serr := StreamWithError(rr, cont, func(se *SOLOStreamError) { onErr = append(onErr, se) }, nil)
 	cont.Close()
 	out := rr.Body.String()
 

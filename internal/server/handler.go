@@ -728,6 +728,8 @@ type chatRequest struct {
 	// MaxContext 网关侧显式开 Max 上下文（客户端原生写法是在模型名后加 __max，
 	// 两种等价，见 chatCompletions 里的判定）。未知字段，OpenAI 客户端会忽略。
 	MaxContext bool `json:"max_context"`
+	// Tools 只用来数个数（面板「工具」列要的是声明量）：工具名与参数不入日志。
+	Tools []json.RawMessage `json:"tools"`
 }
 
 func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
@@ -742,6 +744,10 @@ func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
 	}
 	var peek chatRequest
 	_ = json.Unmarshal(body, &peek)
+	// 声明数先落账：后面任何一步失败（400/换号耗尽）也留得下「这轮本来要用工具」。
+	if tr := traceFrom(r); tr != nil {
+		tr.ToolsDeclared = len(peek.Tools)
+	}
 
 	// 地区前缀（[realm:]model）在这里剥掉：后面 mapModel / 出站 body / 台账都用裸名。
 	realm, bareModel := resolveModel(peek.Model)
@@ -969,12 +975,16 @@ func (h *Handler) attempt(w http.ResponseWriter, acct *auth.Auth, body []byte, p
 		cont := upstream.NewContinueReader(h.cfg.Upstream, acct, body, rc)
 		// 流内业务错误（1005 plan/5xx 等）→ 冷却账号，错误信息注入 SSE。
 		streamErr := false
+		stat := &upstream.StreamStat{}
 		usg, serr := upstream.StreamWithError(w, cont, func(se *upstream.SOLOStreamError) {
 			streamErr = true
 			h.handleStreamError(acct.UID, peek.Model, se)
-		})
+		}, stat)
 		cont.Close()
 		rc.Close()
+		if tr != nil {
+			tr.ToolCalls = stat.ToolCalls
+		}
 		// 空流（上游 200 但零模型事件）：这次尝试一个字节都没写给客户端，
 		// 换号重试比把空回复当成功更合适（照 Trae2api-cn 的「首事件前空响应可重试」）。
 		// 注意不能算 NoteError：空转不是账号故障，罚它会白白把好号熔断掉。
@@ -1025,6 +1035,9 @@ func (h *Handler) attempt(w http.ResponseWriter, acct *auth.Auth, body []byte, p
 		return true, err
 	}
 	h.cfg.Pool.NoteSuccess(acct.UID)
+	if tr != nil {
+		tr.ToolCalls = toolCallCount(resp)
+	}
 	h.noteUsage(acct.UID, peek.Model, attemptStart, true, usageOf(resp), tr)
 	h.bindSession(sessKey, acct.UID)
 	writeJSON(w, http.StatusOK, resp)
@@ -1126,6 +1139,25 @@ func (h *Handler) noteUsage(uid, model string, started time.Time, ok bool, upstr
 		return
 	}
 	h.cfg.Usage.Add(time.Now(), uid, model, d, ok)
+}
+
+// toolCallCount 数非流式聚合响应里 choices[0].message.tool_calls 的条数。
+// 两种组包形态都要认：路径不同组出来的值可能是 []any（JSON 直读）或 []map[string]any，
+// 只认一种会恒记 0（线上冒烟抓到过）。
+func toolCallCount(resp map[string]any) int {
+	choices, _ := resp["choices"].([]any)
+	if len(choices) == 0 {
+		return 0
+	}
+	c0, _ := choices[0].(map[string]any)
+	msg, _ := c0["message"].(map[string]any)
+	switch tc := msg["tool_calls"].(type) {
+	case []any:
+		return len(tc)
+	case []map[string]any:
+		return len(tc)
+	}
+	return 0
 }
 
 // usageOf 取聚合响应里的 usage（上游没给时为 nil，不伪造）。

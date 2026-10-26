@@ -41,6 +41,11 @@ type reqTrace struct {
 	CacheHitTokens   int64
 	Credit           float64
 	HasCredit        bool
+
+	// ToolsDeclared / ToolCalls 工具面观测量：声明数与实际调用数。
+	// 声明了工具而一次都没调用的「正常收尾」在客户端看来就是工具停摆，两个数一起才判得出。
+	ToolsDeclared int
+	ToolCalls     int
 }
 
 // addUsage 把一次出站尝试的用量吸收进本请求的追踪游标。
@@ -245,6 +250,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		HasCredit:        tr.HasCredit,
 		CacheHitTokens:   tr.CacheHitTokens,
 		CacheMissTokens:  tr.cacheMissTokens(),
+		ToolsDeclared:    tr.ToolsDeclared,
+		ToolCalls:        tr.ToolCalls,
 		ClientIP:         tr.ClientIP,
 		UserAgent:        tr.UA,
 	})

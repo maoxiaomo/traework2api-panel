@@ -79,7 +79,7 @@ data:{"finish_reason":"stop"}
 
 `
 	rr := httptest.NewRecorder()
-	if _, err := StreamWithError(rr, strings.NewReader(raw), nil); err != nil {
+	if _, err := StreamWithError(rr, strings.NewReader(raw), nil, nil); err != nil {
 		t.Fatalf("stream: %v", err)
 	}
 	body := rr.Body.String()
@@ -121,7 +121,7 @@ data:{"tool_calls":[{"function":{"arguments":"","name":"get_weather"},"id":"call
 
 `
 	rr := httptest.NewRecorder()
-	if _, err := StreamWithError(rr, strings.NewReader(raw), nil); err != nil {
+	if _, err := StreamWithError(rr, strings.NewReader(raw), nil, nil); err != nil {
 		t.Fatalf("stream: %v", err)
 	}
 	c := concatToolCalls(t, rr.Body.String())[0]
@@ -137,7 +137,7 @@ func TestStreamErrorFrameIsOpenAIObject(t *testing.T) {
 	const raw = "event:output\ndata:{\"response\":\"AAA\"}\n\n" +
 		"event:error\ndata:{\"code\":4011,\"message\":\"exceeded the rate limit\"}\n\n"
 	rr := httptest.NewRecorder()
-	if _, err := StreamWithError(rr, strings.NewReader(raw), nil); err != nil {
+	if _, err := StreamWithError(rr, strings.NewReader(raw), nil, nil); err != nil {
 		t.Fatalf("stream: %v", err)
 	}
 	found := false

@@ -15,7 +15,7 @@ func TestStreamFirstFrameAccountErrorNotWritten(t *testing.T) {
 	var seen []*SOLOStreamError
 	_, err := StreamWithError(rr, strings.NewReader(raw), func(se *SOLOStreamError) {
 		seen = append(seen, se)
-	})
+	}, nil)
 	if err == nil {
 		t.Fatalf("首帧账号级错误应返回给调用方，实得 nil；body=%q", rr.Body.String())
 	}
@@ -36,7 +36,7 @@ func TestStreamFirstFrameAccountErrorNotWritten(t *testing.T) {
 func TestStreamFirstFrameRequestErrorStillWritten(t *testing.T) {
 	const raw = "event:error\ndata:{\"code\":4001,\"message\":\"the param is invalid\"}\n\n"
 	rr := httptest.NewRecorder()
-	_, err := StreamWithError(rr, strings.NewReader(raw), nil)
+	_, err := StreamWithError(rr, strings.NewReader(raw), nil, nil)
 	if err != nil {
 		t.Fatalf("请求级错误不该交回调用方换号: %v", err)
 	}
@@ -52,7 +52,7 @@ func TestStreamErrorAfterOutputStillWritten(t *testing.T) {
 	const raw = "event:output\ndata:{\"response\":\"AAA\"}\n\n" +
 		"event:error\ndata:{\"code\":1005,\"message\":\"plan limit\"}\n\n"
 	rr := httptest.NewRecorder()
-	_, err := StreamWithError(rr, strings.NewReader(raw), nil)
+	_, err := StreamWithError(rr, strings.NewReader(raw), nil, nil)
 	if err != nil {
 		t.Fatalf("已提交的流不能再交回换号: %v", err)
 	}

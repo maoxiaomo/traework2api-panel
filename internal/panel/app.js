@@ -783,6 +783,15 @@ function reqTokenCell(e) {
   return total ? fmtTok(total) : '—';
 }
 
+// 「声明/调用」：声明 >0 而调用为 0 的轮次在对端看来就是工具停摆，标黄才捞得出来。
+function reqToolsCell(e) {
+  const declared = Number(e && e.tools_declared || 0);
+  if (!declared) return '<span class="muted">—</span>';
+  const calls = Number(e && e.tool_calls || 0);
+  const body = declared + ' / ' + calls;
+  return calls ? body : '<span class="tag warn">' + body + '</span>';
+}
+
 function reqCreditCell(e) {
   if (!e || !e.credit_known) return '<span class="muted">—</span>';
   const v = Number(e.credit);
@@ -807,10 +816,11 @@ function renderRequestTable() {
       '<td>' + (ua ? '<span class="clip" title="' + esc(ua) + '">' + esc(ua) + '</span>' : '<span class="muted">—</span>') + '</td>' +
       '<td class="num">' + fmtMs(e && e.duration_ms) + '</td>' +
       '<td class="num">' + reqTokenCell(e) + '</td>' +
+      '<td>' + reqToolsCell(e) + '</td>' +
       '<td class="num">' + reqCreditCell(e) + '</td>' +
       '<td>' + (rid ? '<span class="clip rid" title="' + esc(rid) + '">' + esc(rid) + '</span>' : '<span class="muted">—</span>') + '</td>' +
       '</tr>';
-  }).join('') || '<tr><td colspan="10" class="empty">' +
+  }).join('') || '<tr><td colspan="11" class="empty">' +
       (reqEntries.length ? '没有符合当前筛选条件的请求记录' : '暂无请求记录') + '</td></tr>';
 
   const filtered = list.length !== reqEntries.length;

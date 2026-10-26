@@ -434,22 +434,28 @@ func sortInts(a []int) {
 	}
 }
 
+// StreamStat 下发统计：stat 非 nil 时由 Stream* 回填，供调用方记账。
+// ToolCalls 在**帧写给客户端的那一刻**置 1——客户端中途断开也算它收到过。
+type StreamStat struct {
+	ToolCalls int
+}
+
 // Stream 流式转换：SOLO SSE → OpenAI SSE chunk，每 chunk flush，保证至少一个 [DONE]。
 // 调用方必须先设置过 status 200；本函数自设 SSE headers。
 func Stream(w http.ResponseWriter, r io.Reader) error {
-	_, err := streamOpts(w, r, nil)
+	_, err := streamOpts(w, r, nil, nil)
 	return err
 }
 
 // StreamWithError 同 Stream，额外在遇到上游 event:error 时回调 onErr（非 nil），
 // 供调用方冷却账号/记录日志；错误信息同时注入 SSE 事件流。
 // 返回末帧 token_usage（上游未给时为 nil），供调用方记用量账。
-func StreamWithError(w http.ResponseWriter, r io.Reader, onErr func(*SOLOStreamError)) (map[string]any, error) {
-	return streamOpts(w, r, onErr)
+func StreamWithError(w http.ResponseWriter, r io.Reader, onErr func(*SOLOStreamError), stat *StreamStat) (map[string]any, error) {
+	return streamOpts(w, r, onErr, stat)
 }
 
 // streamOpts Stream 的可选参数版本。
-func streamOpts(w http.ResponseWriter, r io.Reader, onErr func(*SOLOStreamError)) (map[string]any, error) {
+func streamOpts(w http.ResponseWriter, r io.Reader, onErr func(*SOLOStreamError), stat *StreamStat) (map[string]any, error) {
 	// 写出与保活分属两个 goroutine，所以所有写入（含头）走这一把锁串行化；
 	// net/http 的 ResponseWriter 不是并发安全的。
 	var (
@@ -613,6 +619,9 @@ func streamOpts(w http.ResponseWriter, r io.Reader, onErr func(*SOLOStreamError)
 						// tool_calls，正好和下面 done 分支的改写意图相反。
 						if len(tc) > 0 {
 							sawToolCalls = true
+							if stat != nil {
+								stat.ToolCalls = 1
+							}
 						}
 					}
 				}
