@@ -2,6 +2,7 @@
 package panel
 
 import (
+	"context"
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
@@ -361,27 +362,58 @@ func (p *Panel) packages(w http.ResponseWriter, r *http.Request) {
 		Error      string                   `json:"error,omitempty"`
 	}
 	list := p.cfg.Pool.List()
-	out := make([]item, 0, len(list))
-	for _, st := range list {
-		it := item{UID: st.UID, Nickname: st.Nickname, Realm: st.Realm,
-			CreditUnit: upstream.UnitCredit, Packages: []upstream.CreditPackage{}}
-		a := p.cfg.Pool.AuthByUID(st.UID)
-		if a == nil {
-			it.Error = "凭证不可用"
-			out = append(out, it)
-			continue
-		}
-		packs, u, err := p.cfg.Upstream.BalancePackages(a)
-		if err != nil {
-			it.Error = err.Error()
-			out = append(out, it)
-			continue
-		}
-		it.Packages = packs
-		it.CreditUnit = u.Unit
-		it.Remain, it.Size = u.Remain, u.Total
-		it.UsedUSD, it.LimitUSD = u.UsedUSD, u.LimitUSD
-		out = append(out, it)
+	out := make([]item, len(list))
+
+	// 并发拉取 + 每账号独立 12s 超时。串行 + 共享主 HTTP 的旧实现在高并发 chat
+	// 期间被 SSE 长流的连接池饿死：4 个号串行 × 每个 120s 超时 = 面板等 8 分钟。
+	// 现在并发 + Fast 通道（独立 Transport、15s 超时）+ 外层 ctx 兜底，单号慢不拖累整页。
+	type result struct {
+		idx int
+		it  item
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
+	defer cancel()
+	ch := make(chan result, len(list))
+	for i, st := range list {
+		i, st := i, st
+		go func() {
+			it := item{UID: st.UID, Nickname: st.Nickname, Realm: st.Realm,
+				CreditUnit: upstream.UnitCredit, Packages: []upstream.CreditPackage{}}
+			a := p.cfg.Pool.AuthByUID(st.UID)
+			if a == nil {
+				it.Error = "凭证不可用"
+				ch <- result{i, it}
+				return
+			}
+			type pkRes struct {
+				packs []upstream.CreditPackage
+				u     upstream.EntUsage
+				err   error
+			}
+			pkCh := make(chan pkRes, 1)
+			go func() {
+				packs, u, err := p.cfg.Upstream.BalancePackagesFast(a)
+				pkCh <- pkRes{packs, u, err}
+			}()
+			select {
+			case <-ctx.Done():
+				it.Error = "查询超时（上游/连接池被占）"
+			case r2 := <-pkCh:
+				if r2.err != nil {
+					it.Error = r2.err.Error()
+				} else {
+					it.Packages = r2.packs
+					it.CreditUnit = r2.u.Unit
+					it.Remain, it.Size = r2.u.Remain, r2.u.Total
+					it.UsedUSD, it.LimitUSD = r2.u.UsedUSD, r2.u.LimitUSD
+				}
+			}
+			ch <- result{i, it}
+		}()
+	}
+	for range list {
+		r2 := <-ch
+		out[r2.idx] = r2.it
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"accounts": out})
 }

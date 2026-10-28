@@ -559,6 +559,7 @@ func TestPackagesEndpoint(t *testing.T) {
 			]}`)),
 		}, nil
 	})}
+	up.BalanceCli = up.HTTP // packages 走 Fast 通道，测试要把它也指向 mock
 	pl := pool.New("")
 	pl.Add(&auth.Auth{UID: "u1", Nickname: "甲"})
 	p := New(Config{Pool: pl, Upstream: up, APIKey: "k"})

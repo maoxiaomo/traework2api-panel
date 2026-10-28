@@ -273,7 +273,7 @@ func (s *Scheduler) runBalanceLoop(ctx context.Context, interval time.Duration) 
 // （2026-10-15 实测 is_dollar_usage_billing=true、basic_usage_limit=1、basic_usage_amount=0.00059），
 // 老接口把国际号的额度一律读成 0，面板就显示成「无额度」——那不是上游的真实状态。
 func (s *Scheduler) entUsageOf(uid string, a *auth.Auth) (upstream.EntUsage, error) {
-	u, err := s.cfg.Upstream.UserEntUsageDetail(a)
+	u, err := s.cfg.Upstream.UserEntUsageDetailFast(a) // 走独立 BalanceCli，不被 chat SSE 堵死
 	if err != nil {
 		return u, err
 	}
