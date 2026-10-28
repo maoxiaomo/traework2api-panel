@@ -265,8 +265,10 @@ function renderAccounts(list) {
     const cls = a.disabled ? 'off' : (a.cooling ? 'cool' : '');
     const st = [];
     if (a.disabled) st.push(tag('bad', '已禁用'));
+    else if (a.paused) st.push(tag('warn', '暂停选号', '不上对话流量；签到/保活照常'));
     else if (a.cooling) st.push(tag('warn', '冷却中', a.reason));
     else st.push(tag('ok', '可用'));
+    if (a.paused && !a.disabled) st.push(tag('mute', '签到照常'));
     // 签到域冷却与网关冷却分开显示：签到接口拥塞不影响对话选号，反之亦然。
     if (!a.disabled && a.checkin_cooling) {
       st.push(tag('warn', '签到冷却', a.checkin_reason || '签到失败，已暂停自动签到'));
@@ -294,6 +296,8 @@ function renderAccounts(list) {
     if (a.cooling) acts.push('<button class="xs" data-a="clear-cooldown" data-u="' + esc(a.uid) + '">解除冷却</button>');
     if (a.disabled) acts.push('<button class="xs" data-a="enable" data-u="' + esc(a.uid) + '">启用</button>');
     if (!a.disabled) acts.push('<button class="xs danger" data-a="disable" data-u="' + esc(a.uid) + '">禁用</button>');
+    if (!a.paused) acts.push('<button class="xs" data-a="pause" data-u="' + esc(a.uid) + '" title="不上对话流量；签到/保活/领权益照常">暂停选号</button>');
+    if (a.paused) acts.push('<button class="xs" data-a="unpause" data-u="' + esc(a.uid) + '">恢复选号</button>');
     acts.push('<button class="xs danger" data-a="remove" data-u="' + esc(a.uid) + '">移除</button>');
     return '<tr class="' + cls + '"><td class="mark" aria-hidden="true"><i></i></td>' +
       '<td class="who"><div class="nm">' + (a.realm === 'intl' ? '<span class="tag mute">国际</span> ' : '') + esc(a.nickname || a.uid) + '</div><div class="id">' + esc(a.uid) + '</div></td>' +
@@ -1946,7 +1950,9 @@ function checkinMsg(rs, accounts) {
     if (!b) return;
     const u = b.dataset.u, a = b.dataset.a;
     if (a === 'remove' && !confirm('移除账号将删除池状态与 auths/ 下的凭证文件，且不可恢复。确认移除？')) return;
-    if (a === 'disable' && !confirm('禁用后该账号不再参与选号，需手动解冻才能恢复。确认禁用？')) return;
+    if (a === 'disable' && !confirm('禁用后该账号不再参与选号，且不再签到/保活（全下线）。确认禁用？')) return;
+    if (a === 'pause' && !confirm('暂停选号后该账号不上对话流量，但签到/保活/领权益照常。确认暂停？')) return;
+    if (a === 'unpause' && !confirm('恢复该账号的选号（立刻可被选上）？')) return;
     if (a === 'enable' && !confirm('重新启用该账号，让它立刻参与选号？')) return;
     if (a === 'rotate-device' && !confirm('换一套签到/积分设备指纹？服务端按设备记账，换号即重新计数（9074 风控时用它脱开旧标记）。')) return;
     // 凭证预览是只读 GET（服务端只回 token 前缀与长度），不走下面那条 POST 通用路径。
@@ -1979,6 +1985,8 @@ function checkinMsg(rs, accounts) {
       else if (a === 'rotate-device') toast('已换设备指纹' + (r.device_id ? '：' + r.device_id : ''), 'ok');
       else if (a === 'disable') toast('已禁用', 'ok');
       else if (a === 'enable') toast('已启用', 'ok');
+      else if (a === 'pause') toast('已暂停选号（签到照常）', 'ok');
+      else if (a === 'unpause') toast('已恢复选号', 'ok');
       else toast('已移除', 'ok');
     } catch (e) { toast(e.message, 'err'); }
     finally { b.disabled = false; loadOverview(true); }
