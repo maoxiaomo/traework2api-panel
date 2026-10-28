@@ -1403,6 +1403,11 @@ type EntUsage struct {
 	// 美元口径（Unit=UnitUSD 时有效）
 	UsedUSD, LimitUSD float64
 	Expire            int64
+	// ExpireCredits 在 Expire 那一天**真正会作废**的积分（只累加 expire==Expire 且
+	// 还有余量的包）。Expire 本身是「最早到期日」，但账号余额往往分散在多个包里：
+	// 拿总余额当「该日到期」会严重高估（实测某号 4334 分里只有 126 分当天到期，
+	// 其余 4000 分 27 天后才到期），到期提醒会把人误导成「今天必须烧完 4334 分」。
+	ExpireCredits int64
 }
 
 // ExpireAt 统一的到期时刻（两口径同一来源：packExpiry）。
@@ -1486,6 +1491,18 @@ func (c *Client) UserEntUsageDetail(a *auth.Auth) (EntUsage, error) {
 	}
 	now := time.Now().Unix()
 	var expireQuota, expireAny int64
+	// dueCredits 是「expireQuota 那天到期的积分」；expireQuota 变早时同步重置，
+	// 同一天到期则累加。两者必须一起维护，否则日期与金额会指向不同的包。
+	var dueCredits int64
+	dueAt := func(e int64, remain int64) {
+		switch {
+		case e <= 0:
+		case expireQuota == 0 || e < expireQuota:
+			expireQuota, dueCredits = e, remain
+		case e == expireQuota:
+			dueCredits += remain
+		}
+	}
 	for _, p := range resp.UserEntitlementPackList {
 		e := packExpiry(p)
 		if e > now {
@@ -1504,7 +1521,8 @@ func (c *Client) UserEntUsageDetail(a *auth.Auth) (EntUsage, error) {
 			// 美元口径保留小数，不截断（实测 $0.00059 这种量级，取整会全变 0）。
 			u.LimitUSD += limit
 			u.UsedUSD += used
-			if e > now {
+			// 与积分口径同理：已耗尽的包到期不作废任何额度，不该占最早到期位。
+			if e > now && limit-used > 0 {
 				expireQuota = earlier(expireQuota, e)
 			}
 			continue
@@ -1522,13 +1540,13 @@ func (c *Client) UserEntUsageDetail(a *auth.Auth) (EntUsage, error) {
 			// 最早到期位，renderExpiry 会把全部余额错配给它（显示「今天到期 N 分」
 			// 直到真实到期包顶替），ExpiringSoon 选号窗口也会被带偏。
 			if e > now {
-				expireQuota = earlier(expireQuota, e)
+				dueAt(e, remain)
 			}
 		}
 		u.Total += l
 	}
 	if expireQuota > 0 {
-		u.Expire = expireQuota
+		u.Expire, u.ExpireCredits = expireQuota, dueCredits
 	} else {
 		u.Expire = expireAny
 	}
@@ -1613,6 +1631,17 @@ func (c *Client) BalancePackages(a *auth.Auth) ([]CreditPackage, EntUsage, error
 	}
 	now := time.Now().Unix()
 	var expireQuota, expireAny int64
+	// 与 userEntUsageDetailFrom 同口径：expireQuota 与「该日到期积分」一起维护。
+	var dueCredits int64
+	dueAt := func(e int64, remain int64) {
+		switch {
+		case e <= 0:
+		case expireQuota == 0 || e < expireQuota:
+			expireQuota, dueCredits = e, remain
+		case e == expireQuota:
+			dueCredits += remain
+		}
+	}
 	out := make([]CreditPackage, 0, len(resp.UserEntitlementPackList))
 	for _, p := range resp.UserEntitlementPackList {
 		e := packExpiry(p)
@@ -1641,7 +1670,7 @@ func (c *Client) BalancePackages(a *auth.Auth) ([]CreditPackage, EntUsage, error
 			base.RemainUSD, base.UsedUSD, base.SizeUSD = remain, used, limit
 			u.LimitUSD += limit
 			u.UsedUSD += used
-			if e > now {
+			if e > now && remain > 0 {
 				expireQuota = earlier(expireQuota, e)
 			}
 			out = append(out, base)
@@ -1661,12 +1690,12 @@ func (c *Client) BalancePackages(a *auth.Auth) ([]CreditPackage, EntUsage, error
 		u.Total += limit
 		// 同 userEntUsageDetailFrom：只认还有余量的包（remain=0 的包到期无损失）。
 		if e > now && remain > 0 {
-			expireQuota = earlier(expireQuota, e)
+			dueAt(e, remain)
 		}
 		out = append(out, base)
 	}
 	if expireQuota > 0 {
-		u.Expire = expireQuota
+		u.Expire, u.ExpireCredits = expireQuota, dueCredits
 	} else {
 		u.Expire = expireAny
 	}

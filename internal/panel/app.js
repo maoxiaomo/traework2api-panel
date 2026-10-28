@@ -326,10 +326,14 @@ function renderExpiry(list) {
     const remain = Number(a.credits || 0);
     const exp = Number(a.expire || 0);
     if (!exp || remain <= 0) continue;
+    // 该日到期额：expire 那天真正作废的积分。多包账号总余额往往远大于它
+    // （实测某号 4334 分里只有 126 分当天到期），拿总余额当「该日到期」会
+    // 把人误导成「今天必须烧完 4334 分」。0/缺失时回退总余额（老数据）。
+    const due = Number(a.expire_credits || 0) > 0 ? Number(a.expire_credits) : remain;
     // 四舍五入到「天」：向上取整会把 5 小时后到期的说成明天（和日期列矛盾），
     // 纯向下又会把「整 3 天」说成 2 天；按最近的整天报最接近用户直觉。
     const days = Math.max(0, Math.round((exp * 1000 - Date.now()) / 86400000));
-    rows.push({ name: a.nickname || a.uid, uid: a.uid, remain, exp, days });
+    rows.push({ name: a.nickname || a.uid, uid: a.uid, remain, due, exp, days });
   }
   rows.sort((x, y) => x.exp - y.exp);
   const tb = $('expBody');
@@ -338,8 +342,8 @@ function renderExpiry(list) {
     '><td class="who"><div class="nm">' + esc(r.name) + '</div><div class="id">' + esc(r.uid) + '</div></td>' +
     '<td>' + new Date(r.exp * 1000).toLocaleDateString('zh-CN') + '</td>' +
     '<td class="num">' + (r.days === 0 ? '今天' : r.days === 1 ? '明天' : r.days + ' 天') + '</td>' +
-    '<td class="num">' + fmtNum(r.remain) + '</td>' +
-    '<td class="num">' + fmtNum(Math.ceil(r.remain / Math.max(1, r.days))) + '</td></tr>';
+    '<td class="num" title="该日到期 ' + fmtNum(r.due) + ' 分；账号总余额 ' + fmtNum(r.remain) + ' 分">' + fmtNum(r.due) + '</td>' +
+    '<td class="num">' + fmtNum(Math.ceil(r.due / Math.max(1, r.days))) + '</td></tr>';
   const rest = rows.slice(EXP_HEAD);
   tb.innerHTML = !rows.length
     ? '<tr><td colspan="5"><div class="empty">暂无到期信息（上游没给 expire，或余额已为 0）</div></td></tr>'
@@ -351,8 +355,8 @@ function renderExpiry(list) {
         : '');
   applyExpToggle();
   if ($('expNote')) {
-    const total = rows.reduce((s, r) => s + r.remain, 0);
-    $('expNote').textContent = rows.length ? rows.length + ' 个账号 · 合计 ' + fmtNum(total) : '—';
+    const total = rows.reduce((s, r) => s + r.due, 0);
+    $('expNote').textContent = rows.length ? rows.length + ' 个账号 · 该日到期合计 ' + fmtNum(total) : '—';
   }
 }
 

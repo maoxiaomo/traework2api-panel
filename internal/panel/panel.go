@@ -718,6 +718,7 @@ func (p *Panel) refreshBalance(uid string) error {
 	p.cfg.Pool.SetBalance(uid, pool.Balance{
 		Unit: u.Unit, Remain: u.Remain, Total: u.Total,
 		UsedUSD: u.UsedUSD, LimitUSD: u.LimitUSD,
+		ExpireCredits: u.ExpireCredits,
 	}, u.Expire)
 	return nil
 }
