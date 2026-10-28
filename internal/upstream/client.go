@@ -1518,11 +1518,14 @@ func (c *Client) UserEntUsageDetail(a *auth.Auth) (EntUsage, error) {
 		if remain := l - usedCredits; remain > 0 {
 			// 与 CreditPackages 同口径：单包剩余不报负数（超支的包不该把别的包的余额抵掉）。
 			u.Remain += remain
+			// expire 只认还有余量的包：已用完的包到期不作废任何东西，若让它占据
+			// 最早到期位，renderExpiry 会把全部余额错配给它（显示「今天到期 N 分」
+			// 直到真实到期包顶替），ExpiringSoon 选号窗口也会被带偏。
+			if e > now {
+				expireQuota = earlier(expireQuota, e)
+			}
 		}
 		u.Total += l
-		if e > now {
-			expireQuota = earlier(expireQuota, e)
-		}
 	}
 	if expireQuota > 0 {
 		u.Expire = expireQuota
@@ -1656,7 +1659,8 @@ func (c *Client) BalancePackages(a *auth.Auth) ([]CreditPackage, EntUsage, error
 		base.Remain, base.Used, base.Size = remain, used, limit
 		u.Remain += remain
 		u.Total += limit
-		if e > now {
+		// 同 userEntUsageDetailFrom：只认还有余量的包（remain=0 的包到期无损失）。
+		if e > now && remain > 0 {
 			expireQuota = earlier(expireQuota, e)
 		}
 		out = append(out, base)
