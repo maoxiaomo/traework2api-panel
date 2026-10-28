@@ -45,6 +45,22 @@ var listPricesCNY = map[string][3]float64{
 	"deepseek-v4-pro-official":   {9.0, 27.0, 0.3},
 	"deepseek-v4-flash":          {3.0, 9.0, 0.1},
 	"deepseek-v4-flash-official": {3.0, 9.0, 0.1},
+	// ── 以下 2026-10-27 补齐：上游 /v1/models 有、本表缺失的模型 ──
+	// 无官方刊例，按 credit_rate / glm-5.3(0.78) 比例从 glm-5.3 刊例(8/28/2)推算；
+	// 与上游 credit_rate 同源（都是 Trae 定价的相对系数），误差待实测校准。
+	"glm-5.1":            {8.5, 29.8, 2.13},  // rate 0.83
+	"glm-5.3-flashx":     {3.2, 7.1, 0.8},    // rate 0.31；输出 7.1 为探针实测（两次独立一致 284积分/M），含 -max 同价
+	"glm-5v-turbo":       {4.0, 18.0, 1.0},   // rate 缺失，按 glm-5 近似
+	"kimi-k2.5":          {6.5, 27.0, 1.3},   // rate 缺失，按 k2.6 近似
+	"kimi-k3.1-pro":      {12.3, 43.1, 3.08}, // rate 1.2（含 -max 同价）
+	"mimo-v2.6-flash":    {0.6, 2.1, 0.15},   // rate 0.06（含 -max 同价）
+	"mimo-v2.6-pro":      {1.5, 5.4, 0.38},   // rate 0.15（含 -max 同价）
+	"minimax-m2.7":       {2.8, 9.7, 0.69},   // rate 0.27（含 -max 同价）
+	"minimax-m3.1-flash": {0.9, 3.2, 0.23},   // rate 0.09（含 -max 同价）
+	"qwen-3.5":           {2.7, 9.3, 0.67},   // rate 0.26
+	"qwen-3.6-plus":      {2.7, 9.3, 0.67},   // rate 0.26
+	"qwen3.8-flash":      {0.8, 2.9, 0.21},   // rate 0.08（含 -max 同价）
+	"doubao-seed-code":   {0.6, 2.1, 0.15},   // rate 0.06
 }
 
 // creditsPerYuan 元 → 积分的换算（官方元价 × 40 = 积分 / 百万）。
@@ -75,6 +91,15 @@ var measuredOverride = map[string][3]float64{
 func modelKey(model string) string {
 	key := strings.ToLower(strings.TrimSpace(model))
 	key = strings.TrimPrefix(key, "cn:")
+	// -max 变体与基础版同价（上游 credit_rate 相同，max 只扩上下文不改单价）：
+	// 剥掉后缀让 kimi-k3-max 等落到基础版价目上，避免整类请求积分显示 —。
+	// qwen3.8-max 本名以 -max 结尾，不能误剥——只剥「基名也是表内模型」的后缀。
+	if strings.HasSuffix(key, "-max") {
+		base := strings.TrimSuffix(key, "-max")
+		if _, ok := listPricesCNY[base]; ok {
+			key = base
+		}
+	}
 	return key
 }
 
