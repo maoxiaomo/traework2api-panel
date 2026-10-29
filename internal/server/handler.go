@@ -744,6 +744,12 @@ func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
 	}
 	var peek chatRequest
 	_ = json.Unmarshal(body, &peek)
+	// 不传 model 时补全默认模型：mapModel 虽然也会兜底到默认 config_name，但那一步
+	// 只决定**发出去**用什么，shownModel 仍是空 → 运行日志的 model 列、响应体的
+	// model 字段都空着（升级后一直在冒这种「cn: 」空行）。补全后两处都有名字。
+	if strings.TrimSpace(peek.Model) == "" {
+		peek.Model = h.runtime().DefaultModel
+	}
 	// 声明数先落账：后面任何一步失败（400/换号耗尽）也留得下「这轮本来要用工具」。
 	if tr := traceFrom(r); tr != nil {
 		tr.ToolsDeclared = len(peek.Tools)
@@ -976,10 +982,10 @@ func (h *Handler) attempt(w http.ResponseWriter, acct *auth.Auth, body []byte, p
 		// 流内业务错误（1005 plan/5xx 等）→ 冷却账号，错误信息注入 SSE。
 		streamErr := false
 		stat := &upstream.StreamStat{}
-		usg, serr := upstream.StreamWithError(w, cont, func(se *upstream.SOLOStreamError) {
+		usg, serr := upstream.StreamWithErrorModel(w, cont, func(se *upstream.SOLOStreamError) {
 			streamErr = true
 			h.handleStreamError(acct.UID, peek.Model, se)
-		}, stat)
+		}, stat, peek.Model)
 		cont.Close()
 		rc.Close()
 		if tr != nil {
@@ -1040,6 +1046,9 @@ func (h *Handler) attempt(w http.ResponseWriter, acct *auth.Auth, body []byte, p
 	}
 	h.noteUsage(acct.UID, peek.Model, attemptStart, true, usageOf(resp), tr)
 	h.bindSession(sessKey, acct.UID)
+	// 上游聚合响应里 model 恒为空串（SOLO 不透传）；OpenAI 规范要求回显客户端要的
+	// 模型名，部分 SDK 会拿它做校验/路由，空着会踩坑。
+	resp["model"] = peek.Model
 	writeJSON(w, http.StatusOK, resp)
 	return true, nil
 }
