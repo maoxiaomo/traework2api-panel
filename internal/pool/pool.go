@@ -62,15 +62,19 @@ type Status struct {
 	Credits int64  `json:"credits"`
 	// CreditsTotal 上游给的积分总额（各包 credits_limit 之和），只作分母：
 	// 「积分」列显示 剩余/总额。0 表示还没查到过，界面只显示剩余。
-	CreditsTotal int64     `json:"credits_total,omitempty"`
-	Expire       int64     `json:"expire,omitempty"` // 最早到期时间（Unix 秒），0 表示无到期信息
-	Cooling      bool      `json:"cooling"`
-	Until        time.Time `json:"until,omitempty"`
-	Reason       string    `json:"reason,omitempty"`
-	Disabled     bool      `json:"disabled"`
-	ErrCount     int       `json:"err_count,omitempty"`     // 熔断连败计数
-	Degraded     int       `json:"degrade_count,omitempty"` // 降权连败计数
-	InFlight     int       `json:"in_flight,omitempty"`     // 当前在途请求数
+	CreditsTotal int64 `json:"credits_total,omitempty"`
+	Expire       int64 `json:"expire,omitempty"` // 最早到期时间（Unix 秒），0 表示无到期信息
+	// ExpireCredits 在 Expire 那天真正会作废的积分（不是账号总余额）。多包账号两者
+	// 差很多：总余额 4334 分里只有 126 分当天到期时，面板若拿总余额当「该日到期」，
+	// 会误导成「今天必须烧完 4334 分」。0 = 无数据，前端回退到 credits。
+	ExpireCredits int64     `json:"expire_credits,omitempty"`
+	Cooling       bool      `json:"cooling"`
+	Until         time.Time `json:"until,omitempty"`
+	Reason        string    `json:"reason,omitempty"`
+	Disabled      bool      `json:"disabled"`
+	ErrCount      int       `json:"err_count,omitempty"`     // 熔断连败计数
+	Degraded      int       `json:"degrade_count,omitempty"` // 降权连败计数
+	InFlight      int       `json:"in_flight,omitempty"`     // 当前在途请求数
 
 	// 额度口径：上游两份计费体系字段不同名也不可换算（见 upstream.entUsagePack）。
 	//   CreditUnit="credit"（国内，默认）：看 Credits/CreditsTotal
@@ -90,6 +94,8 @@ type Status struct {
 type entry struct {
 	a       *auth.Auth
 	credits int64
+	// expireCredits 在 expire 那天真正作废的积分（与 expire 同源维护）。
+	expireCredits int64
 	// creditsTotal 是上游总额（分母），只由余额查询路径写；见 SetCredits。
 	creditsTotal int64
 	expire       int64
@@ -172,14 +178,15 @@ func (e *entry) healthy(now time.Time) bool {
 // 以前这段是**三处**抄写的匿名 struct（stateFile 里一次、saveLocked 里两次），
 // 加字段必然漏一处；收成具名类型后只有这一份定义。
 type stateAccount struct {
-	Credits      int64     `json:"credits"`
-	CreditsTotal int64     `json:"credits_total,omitempty"`
-	Expire       int64     `json:"expire,omitempty"`
-	Disabled     bool      `json:"disabled"`
-	Reason       string    `json:"reason,omitempty"`
-	Until        time.Time `json:"until,omitempty"`
-	CoolUntil    time.Time `json:"checkin_until,omitempty"`
-	CoolReason   string    `json:"checkin_reason,omitempty"`
+	Credits       int64     `json:"credits"`
+	CreditsTotal  int64     `json:"credits_total,omitempty"`
+	Expire        int64     `json:"expire,omitempty"`
+	ExpireCredits int64     `json:"expire_credits,omitempty"`
+	Disabled      bool      `json:"disabled"`
+	Reason        string    `json:"reason,omitempty"`
+	Until         time.Time `json:"until,omitempty"`
+	CoolUntil     time.Time `json:"checkin_until,omitempty"`
+	CoolReason    string    `json:"checkin_reason,omitempty"`
 	// 连败/退避档位要持久化：重启丢掉退避档位等于每次重启都给故障号一次免费重试。
 	Breaker  int `json:"breaker_streak,omitempty"`
 	Soft     int `json:"soft_streak,omitempty"`
@@ -616,6 +623,8 @@ func (p *Pool) SetCreditsExpire(uid string, credits, total, expire int64) {
 		e.credits = credits
 		e.creditsTotal = total
 		e.expire = expire
+		// 老路径没有逐包信息，该日到期额未知 → 清 0，前端回退到总余额。
+		e.expireCredits = 0
 	}
 	p.saveLocked()
 }
@@ -631,6 +640,8 @@ type Balance struct {
 	// 美元口径（Unit="usd"）。Free plan 实测 used=0.00059，必须留小数。
 	UsedUSD  float64
 	LimitUSD float64
+	// ExpireCredits 与 expire 同日到期的积分（见 Status.ExpireCredits）。
+	ExpireCredits int64
 }
 
 // SetBalance 写一个账号的额度快照（口径感知版，取代只有积分口径的 SetCreditsExpire）。
@@ -657,6 +668,7 @@ func (p *Pool) SetBalance(uid string, b Balance, expire int64) {
 		e.usedUSD, e.limitUSD = 0, 0
 	}
 	e.expire = expire
+	e.expireCredits = b.ExpireCredits
 	p.saveLocked()
 }
 
@@ -981,22 +993,23 @@ func (p *Pool) List() []Status {
 func (p *Pool) statusOf(uid string, e *entry) Status {
 	now := time.Now()
 	return Status{
-		UID:          uid,
-		Nickname:     e.a.Nickname,
-		Realm:        e.a.Realm(),
-		Credits:      e.credits,
-		CreditsTotal: e.creditsTotal,
-		Expire:       e.expire,
-		CreditUnit:   e.unit,
-		UsedUSD:      e.usedUSD,
-		LimitUSD:     e.limitUSD,
-		Cooling:      !e.until.IsZero() && now.Before(e.until),
-		Until:        e.until,
-		Reason:       e.reason,
-		Disabled:     e.disabled,
-		ErrCount:     e.errCount,
-		Degraded:     e.degradeCount,
-		InFlight:     e.inFlight,
+		UID:           uid,
+		Nickname:      e.a.Nickname,
+		Realm:         e.a.Realm(),
+		Credits:       e.credits,
+		CreditsTotal:  e.creditsTotal,
+		Expire:        e.expire,
+		ExpireCredits: e.expireCredits,
+		CreditUnit:    e.unit,
+		UsedUSD:       e.usedUSD,
+		LimitUSD:      e.limitUSD,
+		Cooling:       !e.until.IsZero() && now.Before(e.until),
+		Until:         e.until,
+		Reason:        e.reason,
+		Disabled:      e.disabled,
+		ErrCount:      e.errCount,
+		Degraded:      e.degradeCount,
+		InFlight:      e.inFlight,
 
 		CheckinCooling: !e.coolUntil.IsZero() && now.Before(e.coolUntil),
 		CheckinUntil:   e.coolUntil,
@@ -1038,6 +1051,7 @@ func (p *Pool) load() {
 			credits:          s.Credits,
 			creditsTotal:     s.CreditsTotal,
 			expire:           s.Expire,
+			expireCredits:    s.ExpireCredits,
 			disabled:         s.Disabled,
 			reason:           s.Reason,
 			until:            s.Until,
@@ -1061,21 +1075,22 @@ func (p *Pool) saveLocked() {
 	sf := stateFile{Accounts: map[string]stateAccount{}}
 	for uid, e := range p.byUID {
 		sf.Accounts[uid] = stateAccount{
-			Credits:      e.credits,
-			CreditsTotal: e.creditsTotal,
-			Expire:       e.expire,
-			Disabled:     e.disabled,
-			Reason:       e.reason,
-			Until:        e.until,
-			CoolUntil:    e.coolUntil,
-			CoolReason:   e.coolReason,
-			Breaker:      e.breakerStreak,
-			Soft:         e.softStreak,
-			Degrade:      e.degradeCount,
-			SessDead:     e.sessionDeadFails,
-			Unit:         e.unit,
-			UsedUSD:      e.usedUSD,
-			LimitUSD:     e.limitUSD,
+			Credits:       e.credits,
+			CreditsTotal:  e.creditsTotal,
+			Expire:        e.expire,
+			ExpireCredits: e.expireCredits,
+			Disabled:      e.disabled,
+			Reason:        e.reason,
+			Until:         e.until,
+			CoolUntil:     e.coolUntil,
+			CoolReason:    e.coolReason,
+			Breaker:       e.breakerStreak,
+			Soft:          e.softStreak,
+			Degrade:       e.degradeCount,
+			SessDead:      e.sessionDeadFails,
+			Unit:          e.unit,
+			UsedUSD:       e.usedUSD,
+			LimitUSD:      e.limitUSD,
 		}
 	}
 	raw, err := json.MarshalIndent(sf, "", "  ")

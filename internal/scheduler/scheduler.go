@@ -303,6 +303,7 @@ func (s *Scheduler) entUsageOf(uid string, a *auth.Auth) (upstream.EntUsage, err
 	s.cfg.Pool.SetBalance(uid, pool.Balance{
 		Unit: u.Unit, Remain: u.Remain, Total: u.Total,
 		UsedUSD: u.UsedUSD, LimitUSD: u.LimitUSD,
+		ExpireCredits: u.ExpireCredits,
 	}, u.Expire)
 	return u, nil
 }
