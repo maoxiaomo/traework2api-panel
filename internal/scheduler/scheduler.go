@@ -234,11 +234,31 @@ func isSessionDead(err error) bool {
 // 变量而非常量只为测试能把它调小。
 var checkinRetryInterval = time.Hour
 
+// checkinRetryDue 补签扫描此刻是否该放行。
+//
+// 上游签到日切是自然日 00:00，而补签 loop 原本每小时**无条件**扫一遍，于是日切
+// 之后的第一次扫描就把签到做掉了（进程 :30 分启动 → 00:30 五个号全部 ok +100）。
+// 后果是 checkin_hours 形同虚设：9 点那轮跑过去只能拿到 already checked in，
+// 签到包的到期时刻还跟着提前了 8 个半小时（FEFO 下这 100 分更早进入优先消耗）。
+// 补签的语义是「计划时点没签上之后的兜底」，不是「提前签」——所以计划时点之前
+// 一律不放行。取最早一档：多档配置（如 [9,21]）下过了首档就该补。
+func (s *Scheduler) checkinDue(now time.Time) bool {
+	s.mu.RLock()
+	hours := append([]int(nil), s.cfg.CheckinHours...)
+	s.mu.RUnlock()
+	if len(hours) == 0 {
+		return true // 没配置计划时点 = 不设闸，行为同旧版
+	}
+	return now.Hour() >= slices.Min(hours)
+}
+
 // runCheckinRetryLoop 当天补签：每小时扫一遍，没签上的账号在下一个整点还有机会。
 //
 // 反复扫是安全的：CheckinUID 先查 status，已签的账号直接跳过（幂等），签到域冷却中的账号
 // 也会被 byUrgency 跳过——上游拥塞时不会退化成连打。
 // 「进程起来先扫一遍」不在这里做：`catchUpCheckin` 已经负责启动补跑，重复调用会对上游连打两次。
+// 只在该签的时段扫：checkinRetryDue 挡掉计划时点之前的轮次，否则上游日切一过
+// （00:00）补签就把计划时点抢了，配置里写的几点从此不再生效。
 // ponytail: 固定 1 小时。要更密/更疏就把它做成配置项。
 func (s *Scheduler) runCheckinRetryLoop(ctx context.Context) {
 	t := time.NewTicker(checkinRetryInterval)
@@ -248,6 +268,9 @@ func (s *Scheduler) runCheckinRetryLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
+			if !s.checkinDue(time.Now()) {
+				continue
+			}
 			s.RunCheckinNow()
 		}
 	}
@@ -626,11 +649,10 @@ func (s *Scheduler) CatchUp() {
 	if !enabled || len(hours) == 0 {
 		return
 	}
-	earliest := slices.Min(hours)
-	if h := time.Now().Hour(); h < earliest {
+	if !s.checkinDue(time.Now()) {
 		return
 	}
-	log.Printf("checkin catch-up: 已过 %d 点签到小时，补跑一轮", earliest)
+	log.Printf("checkin catch-up: 已过 %d 点签到小时，补跑一轮", slices.Min(hours))
 	if _, errs := s.RunCheckinNow(); len(errs) != 0 {
 		log.Printf("checkin catch-up: %d 个账号失败", len(errs))
 	}
