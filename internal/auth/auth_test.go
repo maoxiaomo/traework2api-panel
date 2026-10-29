@@ -144,6 +144,21 @@ func TestLoadDir(t *testing.T) {
 	}
 }
 
+func TestLoadDirMissingCreatesIt(t *testing.T) {
+	// issue #2：首次启动没有 auths/ 时不该 fatal，建出来当 0 个账号。
+	dir := filepath.Join(t.TempDir(), "auths", "nested")
+	list, err := LoadDir(dir)
+	if err != nil {
+		t.Fatalf("目录不存在不该报错: %v", err)
+	}
+	if len(list) != 0 {
+		t.Fatalf("空目录应有 0 个账号，got %d", len(list))
+	}
+	if fi, err := os.Stat(dir); err != nil || !fi.IsDir() {
+		t.Fatalf("目录没被创建: %v", err)
+	}
+}
+
 func TestNeedsRefresh(t *testing.T) {
 	a := &Auth{ExpiresAt: 0}
 	if !a.NeedsRefresh(0) {

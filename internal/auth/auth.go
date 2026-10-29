@@ -4,7 +4,9 @@ package auth
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"log"
 	"net/url"
 	"os"
@@ -319,6 +321,15 @@ func (a *Auth) saveAtomicLocked() error {
 // 文件（实测 auths[1]/ 下 1 个账号被读成 0 个）。公开的目录名不该被当模式解析。
 func LoadDir(dir string) ([]*Auth, error) {
 	entries, err := os.ReadDir(dir)
+	// 首次启动没有 auths/ 是常态，不是故障：建出来当 0 个账号，别 fatal 掉整个服务
+	// （issue #2：`load auths: open ./auths: The system cannot find the file specified.`）。
+	if errors.Is(err, fs.ErrNotExist) {
+		if mkErr := os.MkdirAll(dir, 0o755); mkErr != nil {
+			return nil, mkErr
+		}
+		log.Printf("[auth] 目录 %s 不存在，已自动创建（往里放 trae-<uid>.json 即接入账号）", dir)
+		return nil, nil
+	}
 	if err != nil {
 		return nil, err
 	}
