@@ -112,10 +112,10 @@ type entry struct {
 	disabled   bool
 	// paused 暂停选号（人工）：不参与 Pick，但签到/保活/余额刷新/领权益照常。
 	// 与 disabled（全下线，调度器也不碰）是两个语义层级，勿合并。
-	paused     bool
-	reason     string
-	until      time.Time
-	errCount   int // 熔断计数（连败达阈出池）
+	paused   bool
+	reason   string
+	until    time.Time
+	errCount int // 熔断计数（连败达阈出池）
 	// degradeCount 降权计数（不罚号失败）；breakerStreak 熔断已触发次数，用于指数退避。
 	degradeCount  int
 	breakerStreak int
@@ -185,11 +185,11 @@ func (e *entry) healthy(now time.Time) bool {
 // 以前这段是**三处**抄写的匿名 struct（stateFile 里一次、saveLocked 里两次），
 // 加字段必然漏一处；收成具名类型后只有这一份定义。
 type stateAccount struct {
-	Credits       int64     `json:"credits"`
-	CreditsTotal  int64     `json:"credits_total,omitempty"`
-	Expire        int64     `json:"expire,omitempty"`
-	ExpireCredits int64     `json:"expire_credits,omitempty"`
-	Disabled      bool      `json:"disabled"`
+	Credits       int64 `json:"credits"`
+	CreditsTotal  int64 `json:"credits_total,omitempty"`
+	Expire        int64 `json:"expire,omitempty"`
+	ExpireCredits int64 `json:"expire_credits,omitempty"`
+	Disabled      bool  `json:"disabled"`
 	// Paused 持久化：重启不该把人工暂停的号放回选号池。
 	Paused     bool      `json:"paused,omitempty"`
 	Reason     string    `json:"reason,omitempty"`
