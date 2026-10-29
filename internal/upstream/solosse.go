@@ -443,7 +443,7 @@ type StreamStat struct {
 // Stream 流式转换：SOLO SSE → OpenAI SSE chunk，每 chunk flush，保证至少一个 [DONE]。
 // 调用方必须先设置过 status 200；本函数自设 SSE headers。
 func Stream(w http.ResponseWriter, r io.Reader) error {
-	_, err := streamOpts(w, r, nil, nil)
+	_, err := streamOpts(w, r, nil, nil, "")
 	return err
 }
 
@@ -451,11 +451,20 @@ func Stream(w http.ResponseWriter, r io.Reader) error {
 // 供调用方冷却账号/记录日志；错误信息同时注入 SSE 事件流。
 // 返回末帧 token_usage（上游未给时为 nil），供调用方记用量账。
 func StreamWithError(w http.ResponseWriter, r io.Reader, onErr func(*SOLOStreamError), stat *StreamStat) (map[string]any, error) {
-	return streamOpts(w, r, onErr, stat)
+	return streamOpts(w, r, onErr, stat, "")
+}
+
+// StreamWithErrorModel 同 StreamWithError，但每帧的 model 字段回填成 model。
+//
+// 上游 SOLO 的 SSE 帧里 model 恒为空串（见 writeChunk），照抄下去客户端拿到的是
+// "model":"" —— OpenAI 规范要求回显客户端请求的模型名，部分 SDK（litellm 等）
+// 会校验这个字段。回填的是客户端要的名字，不是内部 config_name。
+func StreamWithErrorModel(w http.ResponseWriter, r io.Reader, onErr func(*SOLOStreamError), stat *StreamStat, model string) (map[string]any, error) {
+	return streamOpts(w, r, onErr, stat, model)
 }
 
 // streamOpts Stream 的可选参数版本。
-func streamOpts(w http.ResponseWriter, r io.Reader, onErr func(*SOLOStreamError), stat *StreamStat) (map[string]any, error) {
+func streamOpts(w http.ResponseWriter, r io.Reader, onErr func(*SOLOStreamError), stat *StreamStat, model string) (map[string]any, error) {
 	// 写出与保活分属两个 goroutine，所以所有写入（含头）走这一把锁串行化；
 	// net/http 的 ResponseWriter 不是并发安全的。
 	var (
@@ -513,7 +522,7 @@ func streamOpts(w http.ResponseWriter, r io.Reader, onErr func(*SOLOStreamError)
 			"id":      id,
 			"object":  "chat.completion.chunk",
 			"created": time.Now().Unix(),
-			"model":   "",
+			"model":   model,
 			"choices": []any{
 				map[string]any{
 					"index": 0,
