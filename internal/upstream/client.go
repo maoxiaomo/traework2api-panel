@@ -226,6 +226,12 @@ type Client struct {
 	// discoveryCli 发现专用 HTTP 客户端（短超时）。nil 时按内置短超时新建，
 	// 不受热改的 120s 运行期超时影响，也不占用 HTTP 那套长超时语义。
 	discoveryCli *http.Client
+
+	// BalanceCli 余额/积分包查询专用客户端：独立 Transport + 短超时，
+	// 不被 SSE 长流的连接池占满饿死（packages / balance refresh 在高并发
+	// chat 期间曾被堵到 30s+ 超时，4 个号全失败）。
+	// 公开字段：测试要往这塞自定义 Transport（同 HTTP/StreamHTTP 的惯例）。
+	BalanceCli *http.Client
 }
 
 // New 生产默认值。配置连接池减少 TLS 握手。
@@ -236,9 +242,16 @@ func New() *Client {
 		IdleConnTimeout:       90 * time.Second,
 		ResponseHeaderTimeout: 120 * time.Second, // 首字节兜底（长推理预留），不限制整流时长
 	}
+	balanceTr := &http.Transport{
+		MaxIdleConns:          16,
+		MaxIdleConnsPerHost:   8,
+		IdleConnTimeout:       60 * time.Second,
+		ResponseHeaderTimeout: 15 * time.Second,
+	}
 	return &Client{
 		HTTP:          &http.Client{Timeout: 120 * time.Second, Transport: tr},
 		StreamHTTP:    &http.Client{Transport: tr}, // 无总超时
+		BalanceCli:    &http.Client{Timeout: 15 * time.Second, Transport: balanceTr},
 		AgentHost:     AgentHost,
 		AgentHostIntl: AgentHostIntl,
 		UgHost:        UgHost,
@@ -1443,6 +1456,60 @@ type entUsageResponse struct {
 	} `json:"usage_summary"`
 }
 
+// doJSONBalance 与 doJSON 同形，但走 balanceCli（独立 Transport，不被 SSE 长流堵）。
+// 不持 timeoutMu：balanceCli 是独立的，热改超时走 SetTimeouts 同步写它（写瞬间的
+// 读竞态可接受——balance 失败重试就好，不像 chat 流断开那么伤）。
+func (c *Client) doJSONBalance(req *http.Request) (json.RawMessage, error) {
+	cli := c.BalanceCli
+	if cli == nil {
+		cli = c.HTTP // 测试或老代码手造 Client 时的兜底
+	}
+	resp, err := cli.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	raw, rerr := io.ReadAll(io.LimitReader(resp.Body, maxJSONBody+1))
+	if rerr != nil {
+		return nil, fmt.Errorf("读取上游响应中断（%d 字节已收）: %w", len(raw), rerr)
+	}
+	if len(raw) > maxJSONBody {
+		return nil, fmt.Errorf("上游响应超过 %d 字节上限，放弃解析", maxJSONBody)
+	}
+	if resp.StatusCode >= 400 {
+		kind := Classify(resp.StatusCode, string(raw))
+		return nil, &Error{Kind: kind, Status: resp.StatusCode, Msg: truncate(string(raw), 200)}
+	}
+	return raw, nil
+}
+
+// FetchEntUsageFast 用 balanceCli 拉余额/积分包（面板 packages 视图、定时余额刷新用），
+// 与 fetchEntUsage 的差别只在 HTTP 客户端：快、独立、不被 chat SSE 长流堵死。
+func (c *Client) FetchEntUsageFast(a *auth.Auth) (entUsageResponse, error) {
+	var resp entUsageResponse
+	req, err := http.NewRequest(http.MethodPost, c.ugBaseFor(a)+entUsagePath(a), bytes.NewReader([]byte(entUsageBody)))
+	if err != nil {
+		return resp, err
+	}
+	UgHeaders(req, a)
+	data, err := c.doJSONBalance(req)
+	if err != nil {
+		return resp, err
+	}
+	if err := json.Unmarshal(data, &resp); err != nil {
+		return resp, fmt.Errorf("ent usage parse: %w", err)
+	}
+	if len(resp.UserEntitlementPackList) == 0 {
+		return resp, errors.New("ent usage: 包列表为空（接口异常，不当作 0 分）")
+	}
+	return resp, nil
+}
+
+// BalancePackagesFast 与 BalancePackages 同义，走 FetchEntUsageFast。
+func (c *Client) BalancePackagesFast(a *auth.Auth) ([]CreditPackage, EntUsage, error) {
+	return c.balancePackagesFrom(a, c.FetchEntUsageFast)
+}
+
 // fetchEntUsage 打额度接口并解析（两地区共用，路径与网关见 entUsagePath / ugBaseFor）。
 func (c *Client) fetchEntUsage(a *auth.Auth) (entUsageResponse, error) {
 	var resp entUsageResponse
@@ -1475,8 +1542,8 @@ func (c *Client) fetchEntUsage(a *auth.Auth) (entUsageResponse, error) {
 // 到期时间取两档（见 packExpiry 注释）：
 //  1. 有额度的包里最早的一个未到期时刻——这是「额度到期」，也是选号「快过期优先」的依据；
 //  2. 一个额度包都没有时（例如异常号），回落到所有包的周期截止 end_time。
-func (c *Client) UserEntUsageDetail(a *auth.Auth) (EntUsage, error) {
-	resp, err := c.fetchEntUsage(a)
+func (c *Client) userEntUsageDetailFrom(a *auth.Auth, fetch func(*auth.Auth) (entUsageResponse, error)) (EntUsage, error) {
+	resp, err := fetch(a)
 	if err != nil {
 		return EntUsage{}, err
 	}
@@ -1545,6 +1612,17 @@ func (c *Client) UserEntUsageDetail(a *auth.Auth) (EntUsage, error) {
 	return u, nil
 }
 
+// UserEntUsageDetail 标准版：走主 HTTP（与 SSE 共享连接池，高并发下可能被饿死）。
+func (c *Client) UserEntUsageDetail(a *auth.Auth) (EntUsage, error) {
+	return c.userEntUsageDetailFrom(a, c.fetchEntUsage)
+}
+
+// UserEntUsageDetailFast 走 balanceCli（独立 Transport、15s 超时），
+// 定时余额刷新（RunBalanceRefresh）应改用这个：高并发 chat 期间不再被堵死。
+func (c *Client) UserEntUsageDetailFast(a *auth.Auth) (EntUsage, error) {
+	return c.userEntUsageDetailFrom(a, c.FetchEntUsageFast)
+}
+
 // UserEntUsage 返回剩余积分、积分总额与最早的积分到期时间（积分口径的老接口，行为不变）。
 //
 // 国际版是美元计费、积分恒 0，走这个接口拿不到任何有用数字——需要国际版口径请用
@@ -1599,8 +1677,9 @@ type CreditPackage struct {
 // BalancePackages 口径感知的逐包构成 + 汇总（美元号也拿得到东西）。
 //
 // 判口径同 UserEntUsageDetail：只看顶层 is_dollar_usage_billing。
-func (c *Client) BalancePackages(a *auth.Auth) ([]CreditPackage, EntUsage, error) {
-	resp, err := c.fetchEntUsage(a)
+// balancePackagesFrom 给定 fetcher 时的共用骨架（BalancePackages / BalancePackagesFast 共用）。
+func (c *Client) balancePackagesFrom(a *auth.Auth, fetch func(*auth.Auth) (entUsageResponse, error)) ([]CreditPackage, EntUsage, error) {
+	resp, err := fetch(a)
 	if err != nil {
 		return nil, EntUsage{}, err
 	}
@@ -1667,6 +1746,12 @@ func (c *Client) BalancePackages(a *auth.Auth) ([]CreditPackage, EntUsage, error
 		u.Expire = expireAny
 	}
 	return out, u, nil
+}
+
+// BalancePackages 标准版：走主 HTTP（120s 超时，连接池跟 SSE 共享）。
+// 高并发 chat 期间可能被饿死，调用方在意延迟用 BalancePackagesFast。
+func (c *Client) BalancePackages(a *auth.Auth) ([]CreditPackage, EntUsage, error) {
+	return c.balancePackagesFrom(a, c.fetchEntUsage)
 }
 
 // CreditPackages 积分口径的老接口（行为不变）：只收 credits_limit>0 的包。
