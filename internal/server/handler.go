@@ -876,7 +876,7 @@ func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
 		var err error
 		func() {
 			defer release()
-			done, err = h.attempt(w, acct, body, peek, sessKey, traceFrom(r))
+			done, err = h.attempt(w, acct, body, peek, sessKey, traceFrom(r), shownModel)
 		}()
 		if done {
 			return
@@ -939,7 +939,9 @@ func (h *Handler) acquireAccount(tried map[string]bool, sessKey, realm string) (
 //
 // done=true 表示响应已写给客户端，调用方必须停止轮转；err 非 nil 表示这次尝试失败、
 // 可以换下一个号（错误只用于最终 503 的说明文案）。
-func (h *Handler) attempt(w http.ResponseWriter, acct *auth.Auth, body []byte, peek chatRequest, sessKey string, tr *reqTrace) (bool, error) {
+// shown 是回给客户端的模型名（剥掉地域前缀的客户端名字，可能带 -max）；peek.Model
+// 到这一步已是内部 config_name，只能进台账，不能拿去回显。
+func (h *Handler) attempt(w http.ResponseWriter, acct *auth.Auth, body []byte, peek chatRequest, sessKey string, tr *reqTrace, shown string) (bool, error) {
 	refreshed, err := h.cfg.Upstream.RefreshTokenIfNeeded(acct, h.cfg.RefreshSkew)
 	if err != nil {
 		var ue *upstream.Error
@@ -989,7 +991,7 @@ func (h *Handler) attempt(w http.ResponseWriter, acct *auth.Auth, body []byte, p
 		usg, serr := upstream.StreamWithErrorModel(w, cont, func(se *upstream.SOLOStreamError) {
 			streamErr = true
 			h.handleStreamError(acct.UID, peek.Model, se)
-		}, stat, peek.Model)
+		}, stat, shown)
 		cont.Close()
 		rc.Close()
 		if tr != nil {
@@ -1052,7 +1054,7 @@ func (h *Handler) attempt(w http.ResponseWriter, acct *auth.Auth, body []byte, p
 	h.bindSession(sessKey, acct.UID)
 	// 上游聚合响应里 model 恒为空串（SOLO 不透传）；OpenAI 规范要求回显客户端要的
 	// 模型名，部分 SDK 会拿它做校验/路由，空着会踩坑。
-	resp["model"] = peek.Model
+	resp["model"] = shown
 	writeJSON(w, http.StatusOK, resp)
 	return true, nil
 }

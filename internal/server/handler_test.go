@@ -93,6 +93,39 @@ func TestChatNonStreamAggregates(t *testing.T) {
 	}
 }
 
+func TestChatEchoesRequestedModelNotConfigName(t *testing.T) {
+	// issue #18：响应体 model 必须回显客户端要的名字。gpt-4o 经别名落到 glm-5.2，
+	// 回显 config_name 会让 SDK 拿到的 model 跟请求里的对不上（litellm 等会校验）。
+	up := newFakeUpstream(t, func(authz string) (int, string, bool) {
+		return 200, soloSSE, true
+	})
+	h := NewHandler(Config{
+		Pool:     testPoolWith(&auth.Auth{UID: "u1", AccessToken: "at1", ExpiresAt: 9999999999}),
+		Upstream: up,
+	})
+
+	req := httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(`{"model":"gpt-4o","messages":[{"role":"user","content":"hi"}]}`))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != 200 {
+		t.Fatalf("code=%d body=%s", rec.Code, rec.Body)
+	}
+	var resp map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("resp not json: %v body=%s", err, rec.Body)
+	}
+	if resp["model"] != "gpt-4o" {
+		t.Errorf("非流式 model=%v，期望客户端要的 gpt-4o", resp["model"])
+	}
+
+	req = httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(`{"model":"gpt-4o","stream":true,"messages":[{"role":"user","content":"hi"}]}`))
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if body := rec.Body.String(); !strings.Contains(body, `"model":"gpt-4o"`) {
+		t.Errorf("流式首帧没回显客户端要的模型名: %q", body)
+	}
+}
+
 func TestChatStreamPassthrough(t *testing.T) {
 	up := newFakeUpstream(t, func(authz string) (int, string, bool) {
 		return 200, soloSSE, true
