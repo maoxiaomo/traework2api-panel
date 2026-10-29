@@ -6,6 +6,26 @@ import (
 	"time"
 )
 
+// -max 变体与基础版同价（上游 credit_rate 相同），剥后缀才有估算；但真名以 -max
+// 结尾的（qwen3.8-max）剥了就查不到，只有基名也在表内时才剥。
+func TestModelKeyStripsMaxVariantOnlyWhenBasePriced(t *testing.T) {
+	for _, c := range []struct{ in, want string }{
+		{"cn:glm-5.3-flashx-max", "glm-5.3-flashx"},
+		{"Kimi-K3-Max", "kimi-k3"},
+		{"qwen3.8-max", "qwen3.8-max"},     // 真名，基名 qwen3.8 不在表内
+		{"qwen3.8-max-max", "qwen3.8-max"}, // 变体叠在真名上
+		{"unknown-model-max", "unknown-model-max"},
+	} {
+		if got := modelKey(c.in); got != c.want {
+			t.Errorf("modelKey(%q)=%q want %q", c.in, got, c.want)
+		}
+	}
+	// 端到端：剥完能查到价，才轮得到 EstimateCredit 返回 ok。
+	if _, ok := EstimateCredit("cn:glm-5.3-flashx-max", 1000, 1000, 0); !ok {
+		t.Error("cn:glm-5.3-flashx-max 仍查不到价目，运行日志 credit 会是「—」")
+	}
+}
+
 // 公式与单价表：断言只挑「算错就会把积分报错一个量级」的那几件事。
 func TestEstimateCredit(t *testing.T) {
 	// 刊例 × 40：glm-5.2 输入 8 元/M → 320 积分/M，再乘实测会员补贴 0.675 → 216。
