@@ -72,9 +72,11 @@ type Status struct {
 	Until         time.Time `json:"until,omitempty"`
 	Reason        string    `json:"reason,omitempty"`
 	Disabled      bool      `json:"disabled"`
-	ErrCount      int       `json:"err_count,omitempty"`     // 熔断连败计数
-	Degraded      int       `json:"degrade_count,omitempty"` // 降权连败计数
-	InFlight      int       `json:"in_flight,omitempty"`     // 当前在途请求数
+	// Paused 暂停选号：不参与 Pick，签到等运维照常。面板「暂停选号」按钮写它。
+	Paused   bool `json:"paused,omitempty"`
+	ErrCount int  `json:"err_count,omitempty"`     // 熔断连败计数
+	Degraded int  `json:"degrade_count,omitempty"` // 降权连败计数
+	InFlight int  `json:"in_flight,omitempty"`     // 当前在途请求数
 
 	// 额度口径：上游两份计费体系字段不同名也不可换算（见 upstream.entUsagePack）。
 	//   CreditUnit="credit"（国内，默认）：看 Credits/CreditsTotal
@@ -108,6 +110,9 @@ type entry struct {
 	coolUntil  time.Time
 	coolReason string
 	disabled   bool
+	// paused 暂停选号（人工）：不参与 Pick，但签到/保活/余额刷新/领权益照常。
+	// 与 disabled（全下线，调度器也不碰）是两个语义层级，勿合并。
+	paused     bool
 	reason     string
 	until      time.Time
 	errCount   int // 熔断计数（连败达阈出池）
@@ -164,7 +169,9 @@ func DefaultLimits() Limits {
 }
 
 func (e *entry) healthy(now time.Time) bool {
-	if e.disabled {
+	// paused 也挡选号：它与冷却/禁用同属「不该被 Pick」的状态，
+	// 差异只在调度器是否还跑（调度器只看 disabled，不看 paused）。
+	if e.disabled || e.paused {
 		return false
 	}
 	if !e.until.IsZero() && now.Before(e.until) {
@@ -183,10 +190,12 @@ type stateAccount struct {
 	Expire        int64     `json:"expire,omitempty"`
 	ExpireCredits int64     `json:"expire_credits,omitempty"`
 	Disabled      bool      `json:"disabled"`
-	Reason        string    `json:"reason,omitempty"`
-	Until         time.Time `json:"until,omitempty"`
-	CoolUntil     time.Time `json:"checkin_until,omitempty"`
-	CoolReason    string    `json:"checkin_reason,omitempty"`
+	// Paused 持久化：重启不该把人工暂停的号放回选号池。
+	Paused     bool      `json:"paused,omitempty"`
+	Reason     string    `json:"reason,omitempty"`
+	Until      time.Time `json:"until,omitempty"`
+	CoolUntil  time.Time `json:"checkin_until,omitempty"`
+	CoolReason string    `json:"checkin_reason,omitempty"`
 	// 连败/退避档位要持久化：重启丢掉退避档位等于每次重启都给故障号一次免费重试。
 	Breaker  int `json:"breaker_streak,omitempty"`
 	Soft     int `json:"soft_streak,omitempty"`
@@ -698,6 +707,37 @@ func (e *entry) setCooldownLocked(until time.Time, reason string) {
 	}
 }
 
+// Pause 暂停选号（人工操作）：不挡调度器（签到/保活/余额刷新），只挡 Pick。
+// 与 Disable 的区别：Disable 是全下线（调度器也跳过），Pause 只是不上对话流量。
+// 两个状态可叠加：disabled+paused 的号既不上流量也不签到。
+func (p *Pool) Pause(uid, reason string) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	e, ok := p.byUID[uid]
+	if !ok {
+		return false
+	}
+	e.paused = true
+	if reason != "" {
+		e.reason = reason
+	}
+	p.saveLocked()
+	return true
+}
+
+// Unpause 恢复选号。只清 paused，不动冷却/禁用——该号若有未过冷却仍不会被选。
+func (p *Pool) Unpause(uid string) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	e, ok := p.byUID[uid]
+	if !ok {
+		return false
+	}
+	e.paused = false
+	p.saveLocked()
+	return true
+}
+
 // Disable 永久禁用（session 失效），需人工重登后手工恢复或文件替换。
 func (p *Pool) Disable(uid, reason string) {
 	p.mu.Lock()
@@ -1007,6 +1047,7 @@ func (p *Pool) statusOf(uid string, e *entry) Status {
 		Until:         e.until,
 		Reason:        e.reason,
 		Disabled:      e.disabled,
+		Paused:        e.paused,
 		ErrCount:      e.errCount,
 		Degraded:      e.degradeCount,
 		InFlight:      e.inFlight,
@@ -1053,6 +1094,7 @@ func (p *Pool) load() {
 			expire:           s.Expire,
 			expireCredits:    s.ExpireCredits,
 			disabled:         s.Disabled,
+			paused:           s.Paused,
 			reason:           s.Reason,
 			until:            s.Until,
 			coolUntil:        s.CoolUntil,
@@ -1080,6 +1122,7 @@ func (p *Pool) saveLocked() {
 			Expire:        e.expire,
 			ExpireCredits: e.expireCredits,
 			Disabled:      e.disabled,
+			Paused:        e.paused,
 			Reason:        e.reason,
 			Until:         e.until,
 			CoolUntil:     e.coolUntil,

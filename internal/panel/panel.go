@@ -99,6 +99,8 @@ func New(cfg Config) *Panel {
 	p.mux.HandleFunc("POST /panel/api/accounts/{uid}/balance", p.withAuth(p.accountBalance))
 	p.mux.HandleFunc("POST /panel/api/accounts/{uid}/disable", p.withAuth(p.accountDisable))
 	p.mux.HandleFunc("POST /panel/api/accounts/{uid}/enable", p.withAuth(p.accountEnable))
+	p.mux.HandleFunc("POST /panel/api/accounts/{uid}/pause", p.withAuth(p.accountPause))
+	p.mux.HandleFunc("POST /panel/api/accounts/{uid}/unpause", p.withAuth(p.accountUnpause))
 	p.mux.HandleFunc("POST /panel/api/accounts/{uid}/clear-cooldown", p.withAuth(p.accountClear))
 	// 换 ug 族设备指纹（手动解 9074 风控标记）。
 	p.mux.HandleFunc("POST /panel/api/accounts/{uid}/rotate-device", p.withAuth(p.accountRotateDevice))
@@ -685,6 +687,46 @@ func (p *Panel) accountEnable(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	log.Printf("panel: enabled uid=%s", uid)
+	st, _ := p.cfg.Pool.Status(uid)
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "account": st})
+}
+
+// accountPause 暂停选号：只挡 Pick，签到/保活/余额刷新照常（与禁用的全下线是两回事）。
+func (p *Panel) accountPause(w http.ResponseWriter, r *http.Request) {
+	uid, ok := p.uidFrom(w, r)
+	if !ok {
+		return
+	}
+	if _, exists := p.cfg.Pool.Status(uid); !exists {
+		writeErr(w, http.StatusNotFound, "account not found")
+		return
+	}
+	if !p.cfg.Pool.Pause(uid, "paused from panel") {
+		writeErr(w, http.StatusNotFound, "account not found")
+		return
+	}
+	log.Printf("panel: paused uid=%s", uid)
+	st, _ := p.cfg.Pool.Status(uid)
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "account": st})
+}
+
+// accountUnpause 恢复选号。
+func (p *Panel) accountUnpause(w http.ResponseWriter, r *http.Request) {
+	uid, ok := p.uidFrom(w, r)
+	if !ok {
+		return
+	}
+	old, exists := p.cfg.Pool.Status(uid)
+	if !exists {
+		writeErr(w, http.StatusNotFound, "account not found")
+		return
+	}
+	if !old.Paused {
+		writeErr(w, http.StatusConflict, "account not paused")
+		return
+	}
+	p.cfg.Pool.Unpause(uid)
+	log.Printf("panel: unpaused uid=%s", uid)
 	st, _ := p.cfg.Pool.Status(uid)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "account": st})
 }
