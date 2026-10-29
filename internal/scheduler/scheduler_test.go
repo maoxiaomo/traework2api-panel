@@ -214,6 +214,9 @@ func TestCheckinRetryLoopRescans(t *testing.T) {
 	s := newTestScheduler(f, p, srv)
 	s.mu.Lock()
 	s.cfg.CheckinEnabled = true // 与 catch-up 测试同一套写配置的姿势
+	// 补签只在「已过当日计划时点」之后放行（见 checkinDue），默认 [9] 会让
+	// 凌晨跑的 CI 扫不到东西。本用例要观察的是重扫本身，计划时点设 0 点常开。
+	s.cfg.CheckinHours = []int{0}
 	s.mu.Unlock()
 
 	old := checkinRetryInterval
@@ -620,5 +623,50 @@ func TestBalanceRefreshDoesNotUnfreeze(t *testing.T) {
 	}
 	if st.Credits != 500 {
 		t.Fatalf("余额应被刷新: %+v", st)
+	}
+}
+
+// TestCheckinRetryDueHonoursSchedule 补签扫描不该抢在计划时点之前。
+//
+// 上游签到日切是自然日 00:00，补签 loop 每小时无条件扫一遍就会把签到做在
+// 00:30，checkin_hours 写的 9 点从此拿不到首签（实测连续 10 天的签到包发放
+// 时刻都在 00:30~00:54，分钟偏移还随进程重启漂）。闸门必须是「计划时点之后
+// 才补」，而不是「反正在当天就补」。
+func TestCheckinRetryDueHonoursSchedule(t *testing.T) {
+	f := &fakeUpstream{resourceRemain: 4500}
+	srv := f.server()
+	defer srv.Close()
+	p := pool.New("")
+	p.Add(&auth.Auth{UID: "u1", AccessToken: "at", RefreshToken: "rt", ExpiresAt: 9999999999})
+	s := newTestScheduler(f, p, srv)
+	day := time.Date(2026, 10, 29, 0, 0, 0, 0, time.Local)
+
+	cases := []struct {
+		name  string
+		hours []int
+		at    time.Time
+		want  bool
+	}{
+		// 计划 9 点：日切（00:00）之后但在计划时点之前 → 不放行
+		{"计划9点-凌晨0点半", []int{9}, day.Add(30 * time.Minute), false},
+		{"计划9点-8点59", []int{9}, day.Add(8*time.Hour + 59*time.Minute), false},
+		{"计划9点-9点整", []int{9}, day.Add(9 * time.Hour), true},
+		{"计划9点-晚上", []int{9}, day.Add(21 * time.Hour), true},
+		// 多档取最早：过了首档就该补
+		{"多档9/21-10点", []int{9, 21}, day.Add(10 * time.Hour), true},
+		{"多档9/21-8点", []int{9, 21}, day.Add(8 * time.Hour), false},
+		// 计划 0 点：整日可补（老行为）
+		{"计划0点-凌晨", []int{0}, day.Add(30 * time.Minute), true},
+		// 没配置计划时点 → 不设闸
+		{"未配置", nil, day.Add(30 * time.Minute), true},
+	}
+	for _, c := range cases {
+		s.mu.Lock()
+		s.cfg.CheckinHours = c.hours
+		s.mu.Unlock()
+		if got := s.checkinDue(c.at); got != c.want {
+			t.Errorf("%s: checkinDue(%s)=%v want %v（hours=%v）",
+				c.name, c.at.Format("15:04"), got, c.want, c.hours)
+		}
 	}
 }
